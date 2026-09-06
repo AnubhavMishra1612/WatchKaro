@@ -73,7 +73,11 @@ app = Flask(__name__)
 # PROJECT CONFIGURATION
 # ============================================================
 
-DATA_PATH = os.getenv("DATA_PATH", os.path.join(os.path.dirname(__file__), "data", "clean_movies.csv"))
+DATA_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "data",
+    "clean_movies.csv",
+)
 
 SEARCH_LIMIT = 10
 HOME_SECTION_LIMIT = 10
@@ -109,7 +113,31 @@ else:
 # EXISTING PROJECT MODULES
 # ============================================================
 
-from final_recommender import recommend as v4_recommend
+# ------------------------------------------------------------
+# Render compatibility for older final_recommender.py
+# ------------------------------------------------------------
+# Some older copies of final_recommender.py still contain the
+# Windows-only path C:\movie-recommender\data\clean_movies.csv.
+# During its import, redirect only that legacy path to this
+# deployment-safe dataset path, then restore pandas.read_csv.
+_original_read_csv = pd.read_csv
+
+def _render_read_csv(filepath_or_buffer, *args, **kwargs):
+    if isinstance(filepath_or_buffer, (str, os.PathLike)):
+        raw_path = os.path.normpath(os.fspath(filepath_or_buffer))
+        legacy_path = os.path.normpath(
+            r"C:\movie-recommender\data\clean_movies.csv"
+        )
+        if raw_path.lower() == legacy_path.lower():
+            filepath_or_buffer = DATA_PATH
+    return _original_read_csv(filepath_or_buffer, *args, **kwargs)
+
+pd.read_csv = _render_read_csv
+try:
+    from final_recommender import recommend as v4_recommend
+finally:
+    pd.read_csv = _original_read_csv
+
 
 from tmdb_api import (
     search_movies as tmdb_search_movies,
@@ -1020,7 +1048,6 @@ def _tmdb_details_cached(tmdb_id):
 
 
 def _extract_tmdb_profile(details):
-    """Build a recommendation profile from language, story, genres, actors and director."""
     genres = details.get("genres") or []
     genre_ids = {
         int(g.get("id"))
@@ -1040,51 +1067,28 @@ def _extract_tmdb_profile(details):
         for k in keywords
         if isinstance(k, dict) and safe_string(k.get("name", ""))
     }
+    keyword_ids = [
+        int(k.get("id"))
+        for k in keywords
+        if isinstance(k, dict) and str(k.get("id", "")).isdigit()
+    ]
 
     title = safe_string(details.get("title", ""))
     overview = safe_string(details.get("overview", ""))
     tagline = safe_string(details.get("tagline", ""))
-    language = safe_string(details.get("original_language", "")).lower().strip()
-
-    credits = details.get("credits") or {}
-    cast = credits.get("cast", []) if isinstance(credits, dict) else []
-    crew = credits.get("crew", []) if isinstance(credits, dict) else []
-
-    actor_ids = []
-    actor_names = []
-    for person in cast:
-        if not isinstance(person, dict):
-            continue
-        pid = person.get("id")
-        name = safe_string(person.get("name", ""))
-        if str(pid).isdigit() and int(pid) not in actor_ids:
-            actor_ids.append(int(pid))
-        if name and name not in actor_names:
-            actor_names.append(name.lower())
-        if len(actor_ids) >= 5:
-            break
-
-    director_ids = []
-    director_names = []
-    for person in crew:
-        if not isinstance(person, dict) or person.get("job") != "Director":
-            continue
-        pid = person.get("id")
-        name = safe_string(person.get("name", ""))
-        if str(pid).isdigit() and int(pid) not in director_ids:
-            director_ids.append(int(pid))
-        if name and name not in director_names:
-            director_names.append(name.lower())
-        if len(director_ids) >= 2:
-            break
+    language = safe_string(details.get("original_language", "")).lower()
 
     profile_text = " ".join([
-        title, overview, tagline,
+        title,
+        overview,
+        tagline,
         " ".join(keyword_names),
         " ".join(genre_names),
     ])
     profile_words = _tmdb_text_words(profile_text)
 
+    # Explicit title handling is deliberate: titles such as Hanuman Ans(h)
+    # can have weak/absent keyword metadata in TMDB search results.
     title_words = _tmdb_text_words(title)
     if title_words.intersection({"hanuman", "hanu", "ram", "krishna", "adipurush"}):
         profile_words.update(THEME_TERMS["mythology"])
@@ -1102,40 +1106,10 @@ def _extract_tmdb_profile(details):
         "genre_ids": genre_ids,
         "genre_names": genre_names,
         "keyword_names": keyword_names,
+        "keyword_ids": keyword_ids,
         "profile_words": profile_words,
         "active_themes": active_themes,
-        "actor_ids": tuple(actor_ids),
-        "actor_names": tuple(actor_names),
-        "director_ids": tuple(director_ids),
-        "director_names": tuple(director_names),
     }
-
-
-@lru_cache(maxsize=256)
-def _tmdb_person_movies(person_id, role="cast"):
-    """Cached TMDB filmography used for actor/director candidate generation."""
-    try:
-        data = tmdb_get(
-            f"/person/{int(person_id)}/combined_credits",
-            params={"language": "en-US"},
-            timeout=15,
-        )
-        source = data.get("cast", []) if role == "cast" else data.get("crew", [])
-        results = []
-        for item in source or []:
-            if not isinstance(item, dict):
-                continue
-            if item.get("media_type") not in {None, "movie"}:
-                continue
-            if role == "director" and item.get("job") != "Director":
-                continue
-            movie = dict(item)
-            movie["media_type"] = "movie"
-            results.append(movie)
-        return tuple(results)
-    except Exception as exc:
-        print(f"TMDB person credits error [{person_id}/{role}]:", repr(exc))
-        return tuple()
 
 
 @lru_cache(maxsize=TMDB_SEARCH_CACHE_SIZE)
@@ -1144,6 +1118,7 @@ def tmdb_movie_search(query):
     query = normalize_search_text(query)
     if not query:
         return tuple()
+
     try:
         payload = tmdb_get(
             "/search/movie",
@@ -1154,7 +1129,11 @@ def tmdb_movie_search(query):
                 "page": 1,
             },
         )
-        return tuple(r for r in payload.get("results", []) if isinstance(r, dict))
+        results = payload.get("results", [])
+        return tuple(
+            r for r in results
+            if isinstance(r, dict)
+        )
     except Exception as exc:
         print(f"TMDB direct movie search failed [{query}]:", repr(exc))
         return tuple()
@@ -1162,96 +1141,125 @@ def tmdb_movie_search(query):
 
 @lru_cache(maxsize=TMDB_RECOMMENDATION_CACHE_SIZE)
 def smart_tmdb_recommendations(tmdb_id, limit=20):
-    """Language-safe recommendations ranked by actors, director, story, genre and themes."""
+    """
+    Build recommendations from fresh TMDB metadata instead of trusting
+    TMDB's recommendation order.
+
+    Important change: for strongly themed movies we can completely exclude
+    weak generic recommendations that do not match the selected movie's
+    theme. This fixes cases such as Hanuman Ansh -> unrelated family films.
+    """
     details = _tmdb_details_cached(str(tmdb_id))
     if not details:
         return tuple()
 
     profile = _extract_tmdb_profile(details)
+
     selected_id = safe_string(details.get("id", tmdb_id))
     selected_title = normalize_search_text(profile["title"])
-    selected_language = profile["language"]
 
-    # STRICT LANGUAGE RULE:
-    # A Hindi movie gets Hindi recommendations, an English movie gets English
-    # recommendations, Tamil gets Tamil, etc. Never trade language for popularity.
-    STRICT_LANGUAGES = {"en", "hi", "ta", "te", "ml", "kn", "bn", "mr", "gu", "pa", "ur",
-                        "fr", "es", "de", "it", "ja", "ko", "zh", "ru", "pt", "ar", "tr", "th", "id", "vi", "fa", "pl", "nl", "sv", "da", "no", "fi", "cs", "el"}
-
-    candidates = {}
-
-    def add_candidate(movie, query="", weight=0.0, actor_hit=False, director_hit=False):
-        if not isinstance(movie, dict):
-            return
-        movie_id = safe_string(movie.get("id", movie.get("tmdb_id", "")))
-        if not movie_id or movie_id == selected_id:
-            return
-        language = safe_string(movie.get("original_language", "")).lower().strip()
-        if selected_language in STRICT_LANGUAGES and language != selected_language:
-            return
-        entry = candidates.setdefault(
-            movie_id,
-            {"movie": dict(movie), "query_weight": 0.0, "actor_hit": False, "director_hit": False},
-        )
-        entry["query_weight"] += weight
-        entry["actor_hit"] = entry["actor_hit"] or actor_hit
-        entry["director_hit"] = entry["director_hit"] or director_hit
-
-    # 1) Actor filmographies — strongest signal after language.
-    for actor_id in profile["actor_ids"][:5]:
-        for movie in _tmdb_person_movies(actor_id, "cast"):
-            add_candidate(movie, "__actor__", 8.0, actor_hit=True)
-
-    # 2) Director filmography — very strong signal.
-    for director_id in profile["director_ids"][:2]:
-        for movie in _tmdb_person_movies(director_id, "director"):
-            add_candidate(movie, "__director__", 10.0, director_hit=True)
-
-    # 3) Story / genre / keyword searches.
+    # ------------------------------------------------------------
+    # Candidate query generation
+    # ------------------------------------------------------------
     queries = []
-    title_words = [w for w in profile["title"].lower().split() if w not in STOPWORDS and len(w) >= 4]
-    queries.extend(title_words[:2])
-    queries.extend(sorted(profile["keyword_names"])[:6])
-    queries.extend(sorted(profile["genre_names"])[:3])
+
+    # Title phrases first.
+    title_words = [
+        w for w in profile["title"].lower().split()
+        if w not in STOPWORDS and len(w) >= 4
+    ]
+    queries.extend(title_words[:3])
+
+    # Strong keyword phrases next.
+    useful_keywords = []
+    for keyword in sorted(profile["keyword_names"]):
+        normalized = normalize_search_text(keyword)
+        if normalized and len(normalized) >= 4 and normalized not in STOPWORDS:
+            if not any(normalized == q for q in useful_keywords):
+                useful_keywords.append(normalized)
+    queries.extend(useful_keywords[:6])
+
+    # Theme queries are the fallback/expansion layer.
     for theme in profile["active_themes"]:
-        queries.append(theme)
         if theme == "mythology":
-            queries.extend(["hanuman", "ramayana", "krishna", "hindu mythology"])
-        elif theme == "sports":
-            queries.extend(["sports", "cricket", "wrestling", "boxing"])
-        elif theme == "crime":
-            queries.extend(["crime", "gangster", "detective", "heist"])
+            queries.extend(["hanuman", "ramayana", "krishna", "hindu mythology", "adipurush"])
+        elif theme == "superhero":
+            queries.extend(["superhero", "marvel", "dc", "superman", "batman"])
         elif theme == "horror":
             queries.extend(["horror", "ghost", "demon", "haunted"])
         elif theme == "romance":
             queries.extend(["romance", "romantic", "love"])
+        elif theme == "sports":
+            queries.extend(["sports", "cricket", "football", "boxing"])
+        elif theme == "crime":
+            queries.extend(["crime", "gangster", "detective", "heist"])
         elif theme == "family":
-            queries.extend(["family", "friendship", "school"])
-        elif theme == "superhero":
-            queries.extend(["superhero", "comic", "vigilante"])
+            queries.extend(["family", "kids", "animation", "cartoon"])
 
+    # One broad genre query is useful when keyword metadata is sparse.
+    queries.extend(sorted(profile["genre_names"])[:2])
+
+    # Preserve order + remove duplicates.
     seen_queries = set()
+    final_queries = []
     for q in queries:
-        q = normalize_search_text(q)
-        if not q or q in seen_queries:
-            continue
-        seen_queries.add(q)
-        for rank, movie in enumerate(tmdb_movie_search(q)[:10]):
-            add_candidate(movie, q, max(1.0, 6.0 - rank * 0.5))
+        nq = normalize_search_text(q)
+        if nq and nq not in seen_queries:
+            seen_queries.add(nq)
+            final_queries.append(nq)
 
-    # 4) TMDB recommendations/similar are only supplemental and still pass strict language filter.
-    try:
-        for rank, movie in enumerate(get_movie_recommendations(int(tmdb_id), page=1) or []):
-            add_candidate(movie, "__tmdb_recommendations__", max(0.5, 2.0 - rank * 0.05))
-    except Exception:
-        pass
-    try:
-        payload = tmdb_get(f"/movie/{int(tmdb_id)}/similar", params={"page": 1})
-        for rank, movie in enumerate(payload.get("results", []) or []):
-            add_candidate(movie, "__tmdb_similar__", max(0.25, 1.5 - rank * 0.04))
-    except Exception:
-        pass
+    # ------------------------------------------------------------
+    # Gather candidates
+    # ------------------------------------------------------------
+    candidates = {}
 
+    def add_candidate(movie, query, weight):
+        if not isinstance(movie, dict):
+            return
+        movie_id = safe_string(movie.get("id", ""))
+        if not movie_id or movie_id == selected_id:
+            return
+
+        entry = candidates.setdefault(
+            movie_id,
+            {"movie": dict(movie), "query_hits": {}, "query_weight": 0.0},
+        )
+        entry["query_hits"][query] = entry["query_hits"].get(query, 0) + 1
+        entry["query_weight"] += weight
+
+    # Search candidates from theme/title/keyword queries.
+    for query in final_queries[:12]:
+        results = tmdb_movie_search(query)
+        for rank, movie in enumerate(results[:10]):
+            add_candidate(movie, query, max(1.0, 10.0 - rank))
+
+    # Add TMDB recommendation + similar feeds only as a secondary source.
+    try:
+        base_recommendations = get_movie_recommendations(
+            int(tmdb_id),
+            page=1,
+        ) or []
+    except Exception:
+        base_recommendations = []
+
+    try:
+        similar_payload = tmdb_get(
+            f"/movie/{int(tmdb_id)}/similar",
+            params={"page": 1},
+        )
+        base_similar = similar_payload.get("results", []) or []
+    except Exception:
+        base_similar = []
+
+    for rank, movie in enumerate(base_recommendations[:20]):
+        add_candidate(movie, "__recommendations__", max(0.25, 2.0 - rank * 0.05))
+
+    for rank, movie in enumerate(base_similar[:20]):
+        add_candidate(movie, "__similar__", max(0.15, 1.5 - rank * 0.04))
+
+    # ------------------------------------------------------------
+    # Rank candidates
+    # ------------------------------------------------------------
     ranked = []
     strong_theme = bool(profile["active_themes"])
 
@@ -1262,59 +1270,71 @@ def smart_tmdb_recommendations(tmdb_id, limit=20):
         if not title_norm or title_norm == selected_title:
             continue
 
-        # Language is a hard gate, not a scoring preference.
-        language = safe_string(movie.get("original_language", "")).lower().strip()
-        if selected_language in STRICT_LANGUAGES and language != selected_language:
-            continue
-
         candidate_words = _tmdb_text_words(" ".join([
             title,
             safe_string(movie.get("overview", "")),
-            safe_string(movie.get("tagline", "")),
         ]))
-        candidate_genres = {int(x) for x in (movie.get("genre_ids") or []) if str(x).isdigit()}
-        genre_overlap = len(profile["genre_ids"].intersection(candidate_genres))
-        story_overlap = len(profile["profile_words"].intersection(candidate_words))
 
-        actor_score = 30.0 if item["actor_hit"] else 0.0
-        director_score = 40.0 if item["director_hit"] else 0.0
-        genre_score = min(genre_overlap, 3) * 10.0
-        story_score = min(story_overlap * 2.5, 25.0)
+        candidate_genres = {
+            int(x) for x in (movie.get("genre_ids") or [])
+            if str(x).isdigit()
+        }
+        genre_overlap = len(profile["genre_ids"].intersection(candidate_genres))
+
+        language = safe_string(movie.get("original_language", "")).lower()
+        lang_score = 16.0 if profile["language"] and language == profile["language"] else 0.0
+        if profile["language"] in {"hi", "ta", "te", "ml", "kn"} and language in {"hi", "ta", "te", "ml", "kn"}:
+            lang_score = max(lang_score, 8.0)
+
+        profile_overlap = len(profile["profile_words"].intersection(candidate_words))
+        text_score = min(profile_overlap * 2.0, 16.0)
+        genre_score = min(genre_overlap, 3) * 12.0
         query_score = min(item["query_weight"], 30.0)
 
         theme_score = 0.0
-        theme_penalty = 0.0
+        theme_mismatch = 0.0
         for theme in profile["active_themes"]:
-            hits = len(THEME_TERMS[theme].intersection(candidate_words))
-            if hits:
-                theme_score += min(10.0 + hits * 3.0, 22.0)
+            terms = THEME_TERMS[theme]
+            hit_count = len(terms.intersection(candidate_words))
+            if hit_count:
+                theme_score += min(12.0 + hit_count * 3.0, 24.0)
             elif strong_theme:
-                theme_penalty += 8.0
+                theme_mismatch += 20.0
 
         rating = safe_float(movie.get("vote_average", 0.0))
         popularity = min(safe_float(movie.get("popularity", 0.0)), 100.0)
-        quality_score = (rating / 10.0) * 4.0 + (popularity / 100.0) * 2.0
+        quality_score = (rating / 10.0) * 6.0 + (popularity / 100.0) * 3.0
+
+        # For strong themes, generic TMDB recommendations must prove relevance.
+        if strong_theme and theme_score == 0 and query_score < 4.0:
+            theme_mismatch += 12.0
 
         total = (
-            actor_score + director_score + genre_score + story_score
-            + query_score + theme_score + quality_score - theme_penalty
+            query_score
+            + genre_score
+            + lang_score
+            + text_score
+            + theme_score
+            + quality_score
+            - theme_mismatch
         )
+
         ranked.append((total, movie))
 
-    ranked.sort(key=lambda x: x[0], reverse=True)
+    ranked.sort(key=lambda item: item[0], reverse=True)
+
     top = [movie for _, movie in ranked[:limit]]
 
     print("=" * 60)
-    print("WATCHKARO SMART RECOMMENDER V3")
+    print("SMART TMDB RECOMMENDER")
     print("Selected:", profile["title"])
-    print("Language:", selected_language)
-    print("Actors:", ", ".join(profile["actor_names"][:5]))
-    print("Directors:", ", ".join(profile["director_names"][:2]))
     print("Themes:", profile["active_themes"])
-    print("Final recommendations:")
+    print("Queries:", final_queries[:12])
+    print("Top recommendations:")
     for i, movie in enumerate(top[:10], 1):
-        print(f"  {i:02d}. {movie.get('title', 'Unknown')} [{movie.get('original_language', '')}]")
+        print(f"  {i:02d}. {movie.get('title', 'Unknown')}")
     print("=" * 60)
+
     return tuple(top)
 
 # ============================================================
@@ -1541,10 +1561,11 @@ def build_home_sections():
     home = {
         "trending": [],
         "recent": [],
-        "drama": [],
-        "horror": [],
+        "mystery": [],
         "bollywood": [],
-        "hollywood": [],
+        "south": [],
+        "english": [],
+        "animation": [],
     }
 
     # --------------------------------------------------------
@@ -1562,15 +1583,9 @@ def build_home_sections():
             "sort_by": "primary_release_date.desc",
             "vote_count_gte": 3,
         },
-        "drama": {
-            "name": "Drama",
-            "genre_ids": "18",
-            "sort_by": "popularity.desc",
-            "vote_count_gte": 10,
-        },
-        "horror": {
-            "name": "Horror",
-            "genre_ids": "27",
+        "mystery": {
+            "name": "Mystery & Thriller",
+            "genre_ids": "9648|53",
             "sort_by": "popularity.desc",
             "vote_count_gte": 10,
         },
@@ -1580,11 +1595,23 @@ def build_home_sections():
             "sort_by": "popularity.desc",
             "vote_count_gte": 5,
         },
-        "hollywood": {
-            "name": "Hollywood",
+        "south": {
+            "name": "South Indian",
+            "original_language": "ta|te|ml|kn",
+            "sort_by": "popularity.desc",
+            "vote_count_gte": 5,
+        },
+        "english": {
+            "name": "English",
             "original_language": "en",
             "sort_by": "popularity.desc",
             "vote_count_gte": 10,
+        },
+        "animation": {
+            "name": "Animation & Cartoons",
+            "genre_ids": "16",
+            "sort_by": "popularity.desc",
+            "vote_count_gte": 5,
         },
     }
 
@@ -1594,7 +1621,7 @@ def build_home_sections():
     print("=" * 70)
 
     with ThreadPoolExecutor(
-        max_workers=6
+        max_workers=7
     ) as executor:
 
         future_map = {
@@ -1651,18 +1678,11 @@ def build_home_sections():
             HOME_SECTION_LIMIT,
         )
 
-    if not home["drama"]:
-        home["drama"] = get_local_2026_movies(
+    if not home["mystery"]:
+        home["mystery"] = get_local_2026_movies(
             work,
             HOME_SECTION_LIMIT,
-            genre_terms=["drama"],
-        )
-
-    if not home["horror"]:
-        home["horror"] = get_local_2026_movies(
-            work,
-            HOME_SECTION_LIMIT,
-            genre_terms=["horror"],
+            genre_terms=["mystery", "thriller"],
         )
 
     if not home["bollywood"]:
@@ -1672,11 +1692,30 @@ def build_home_sections():
             language_codes={"hi"},
         )
 
-    if not home["hollywood"]:
-        home["hollywood"] = get_local_2026_movies(
+    if not home["south"]:
+        home["south"] = get_local_2026_movies(
+            work,
+            HOME_SECTION_LIMIT,
+            language_codes={
+                "ta",
+                "te",
+                "ml",
+                "kn",
+            },
+        )
+
+    if not home["english"]:
+        home["english"] = get_local_2026_movies(
             work,
             HOME_SECTION_LIMIT,
             language_codes={"en"},
+        )
+
+    if not home["animation"]:
+        home["animation"] = get_local_2026_movies(
+            work,
+            HOME_SECTION_LIMIT,
+            genre_terms=["animation"],
         )
 
     return home
@@ -1699,10 +1738,11 @@ print(
 for section_name in (
     "trending",
     "recent",
-    "drama",
-    "horror",
+    "mystery",
     "bollywood",
-    "hollywood",
+    "south",
+    "english",
+    "animation",
 ):
     print(
         f"{section_name.title():<15}: "
@@ -2273,24 +2313,11 @@ def recommendation():
         selected_movie["media_type"] = "movie"
 
         try:
-            local_tmdb_id = safe_string(selected_movie.get("tmdb_id", ""))
-            if local_tmdb_id:
-                recommendations = [
-                    movie_to_dict(movie)
-                    for movie in smart_tmdb_recommendations(local_tmdb_id, 20)
-                ]
-                print("Local movie recommendation path: SMART TMDB V3")
-            else:
-                recommendations = prepare_recommendations(
-                    cached_v4_recommendations(selected_movie["title"])
+            recommendations = prepare_recommendations(
+                cached_v4_recommendations(
+                    selected_movie["title"]
                 )
-                # Final language gate for legacy/local fallback.
-                selected_lang = safe_string(selected_movie.get("language_code", "")).lower().strip()
-                if selected_lang:
-                    recommendations = [
-                        movie for movie in recommendations
-                        if safe_string(movie.get("language_code", "")).lower().strip() == selected_lang
-                    ]
+            )
 
         except Exception as exc:
             print(
