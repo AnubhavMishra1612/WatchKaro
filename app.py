@@ -214,6 +214,7 @@ LANGUAGE_NAMES = {
 # ============================================================
 
 def safe_string(value, default=""):
+    """Safely convert a scalar value to text without pandas."""
     try:
         if value is None:
             return default
@@ -221,9 +222,8 @@ def safe_string(value, default=""):
         if isinstance(value, (list, tuple, dict, set)):
             return default
 
-        missing = pd.isna(value)
-
-        if isinstance(missing, bool) and missing:
+        # NaN is the only common value that is not equal to itself.
+        if isinstance(value, float) and value != value:
             return default
 
         return str(value)
@@ -232,13 +232,15 @@ def safe_string(value, default=""):
 
 
 def safe_float(value, default=0.0):
+    """Safely convert a value to float without pandas."""
     try:
         if value is None:
             return default
 
         result = float(value)
 
-        if pd.isna(result):
+        # NaN is not equal to itself.
+        if result != result:
             return default
 
         return result
@@ -813,9 +815,9 @@ def smart_tmdb_recommendations(tmdb_id, limit=20):
 
     ranked = []
 
-    # Only enrich the first 12 candidates. This keeps one recommendation
+    # Only enrich the first 6 candidates. This keeps one recommendation
     # request small enough for Render's free memory/CPU limits.
-    for item in sorted(candidates.values(), key=lambda x: x["source_score"], reverse=True)[:8]:
+    for item in sorted(candidates.values(), key=lambda x: x["source_score"], reverse=True)[:6]:
         movie = item["movie"]
         mid = safe_string(movie.get("id", ""))
         candidate_details = _tmdb_details_cached(mid)
