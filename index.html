@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+    <meta
+        name="description"
+        content="AI-powered movie recommendation system with local recommendations and live TMDB discovery."
+    >
+
+    <title>WatchKaro — AI Movie Recommendations</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+</head>
+
+<body>
+
+<header class="site-header">
+    <div class="header-inner">
+        <a
+            class="brand"
+            href="{{ url_for('home') }}"
+            aria-label="WatchKaro Home"
+        >
+            <span class="brand-mark">M</span>
+            <span>
+                <strong>WatchKaro</strong>
+                <small>AI Movie Recommender</small>
+            </span>
+        </a>
+
+        <div class="header-status">
+            <span class="status-dot"></span>
+            Live 2026 Discovery
+        </div>
+    </div>
+</header>
+
+
+<main class="page-shell">
+
+    <!-- =====================================================
+         HERO / SEARCH
+    ====================================================== -->
+
+    <section class="hero-section">
+
+        <div class="hero-copy">
+            <span class="hero-kicker">
+                SMART DISCOVERY • PERSONALIZED PICKS
+            </span>
+
+            <h1>
+                Kya dekhna hai?
+                <span>WatchKaro.</span>
+            </h1>
+
+            <p>
+                Search across the local movie library and TMDB,
+                then get recommendations powered by your
+                hybrid V4 recommendation engine.
+            </p>
+        </div>
+
+
+        <form
+            action="{{ url_for('recommendation') }}"
+            method="POST"
+            class="search-box"
+            id="searchForm"
+            autocomplete="off"
+        >
+            <div class="search-input-wrapper">
+
+                <span class="search-icon" aria-hidden="true">
+                    ⌕
+                </span>
+
+                <input
+                    type="text"
+                    id="movieInput"
+                    name="movie"
+                    placeholder="Search movies or TV series..."
+                    spellcheck="false"
+                    aria-label="Search movie or TV series"
+                    aria-autocomplete="list"
+                    aria-controls="suggestions"
+                >
+
+                <div
+                    id="suggestions"
+                    class="suggestions"
+                    role="listbox"
+                ></div>
+
+            </div>
+
+            <input
+                type="hidden"
+                name="media_type"
+                id="selectedMediaType"
+                value=""
+            >
+
+            <input
+                type="hidden"
+                name="source"
+                id="selectedSource"
+                value=""
+            >
+
+            <input
+                type="hidden"
+                name="tmdb_id"
+                id="selectedTmdbId"
+                value=""
+            >
+
+            <button
+                type="submit"
+                class="search-button"
+                id="recommendButton"
+            >
+                <span>Recommend</span>
+                <span aria-hidden="true">→</span>
+            </button>
+        </form>
+
+        <div class="search-hints">
+            <span>Try:</span>
+            <button type="button" data-example="Inception">
+                Inception
+            </button>
+            <button type="button" data-example="Terminator">
+                Terminator
+            </button>
+            <button type="button" data-example="Doraemon">
+                Doraemon
+            </button>
+            <button type="button" data-example="Horror">
+                Horror
+            </button>
+            <button type="button" data-example="Interstellar">
+                Interstellar
+            </button>
+        </div>
+
+    </section>
+
+
+    {% if error %}
+    <div class="message message-error">
+        <strong>Something went wrong.</strong>
+        <span>{{ error }}</span>
+    </div>
+    {% endif %}
+
+
+    {% if notice %}
+    <div class="message message-notice">
+        <strong>TV series selected.</strong>
+        <span>{{ notice }}</span>
+    </div>
+    {% endif %}
+
+
+    <!-- =====================================================
+         SELECTED MOVIE / TV
+    ====================================================== -->
+
+    {% if selected_movie %}
+    <section class="selected-section">
+
+        <div class="section-heading">
+            <div>
+                <span class="section-kicker">
+                    SELECTED TITLE
+                </span>
+                <h2>
+                    {{ selected_movie.title }}
+                </h2>
+            </div>
+        </div>
+
+        <article class="selected-card">
+
+            <div class="selected-poster">
+                {% if selected_movie.poster %}
+                    <img
+                        src="{{ selected_movie.poster }}"
+                        alt="{{ selected_movie.title }}"
+                    >
+                {% else %}
+                    <div class="no-poster large">
+                        No Poster
+                    </div>
+                {% endif %}
+            </div>
+
+            <div class="selected-content">
+
+                <div class="badge-row">
+                    <span class="badge">
+                        {{ selected_movie.source }}
+                    </span>
+
+                    <span class="badge muted">
+                        {{ selected_movie.media_type | upper }}
+                    </span>
+                </div>
+
+                <h3>
+                    {{ selected_movie.title }}
+                </h3>
+
+                <div class="selected-meta">
+                    <span>📅 {{ selected_movie.year or "N/A" }}</span>
+                    <span>🌐 {{ selected_movie.language or "Unknown" }}</span>
+                    <span>⭐ {{ selected_movie.rating }}</span>
+                    <span>🎭 {{ selected_movie.genres or "Genre unavailable" }}</span>
+                </div>
+
+                {% if selected_movie.overview %}
+                    <p class="movie-overview">
+                        {{ selected_movie.overview }}
+                    </p>
+                {% else %}
+                    <p class="movie-overview muted-text">
+                        No overview is available for this title.
+                    </p>
+                {% endif %}
+
+                
+  
+
+                {% if selected_movie.cast %}
+                    <p class="movie-overview" style="margin-top:12px;font-size:12px;line-height:1.6;">
+                        <strong style="color:#ffc107;">Cast:</strong>
+                        {{ selected_movie.cast }}
+                    </p>
+                {% endif %}
+
+                {% if selected_movie.director %}
+                    <p class="movie-overview" style="margin-top:4px;font-size:12px;line-height:1.6;">
+                        <strong style="color:#ffc107;">Director:</strong>
+                        {{ selected_movie.director }}
+                    </p>
+                {% endif %}
+
+            </div>
+
+        </article>
+
+    </section>
+    {% endif %}
+
+
+    <!-- =====================================================
+         RECOMMENDATIONS
+    ====================================================== -->
+
+    {% if recommendations %}
+    <section class="recommendations-section">
+
+        <div class="section-heading">
+            <div>
+                <span class="section-kicker">
+                    PERSONALIZED RESULTS
+                </span>
+                <h2>🎯 Recommended For You</h2>
+            </div>
+
+            <span class="section-count">
+                {{ recommendations | length }} picks
+            </span>
+        </div>
+
+        <div class="movie-grid">
+
+            {% for movie in recommendations %}
+
+                <a
+                    class="movie-card-link"
+                    href="{{ url_for('recommendation') }}?movie={{ movie.title | urlencode }}{% if movie.tmdb_id %}&source=TMDB&media_type={{ movie.media_type }}&tmdb_id={{ movie.tmdb_id }}{% endif %}"
+                >
+
+                    <article class="movie-card">
+
+                        <div class="poster-wrap">
+
+                            {% if movie.poster %}
+                                <img
+                                    src="{{ movie.poster }}"
+                                    alt="{{ movie.title }}"
+                                    loading="lazy"
+                                >
+                            {% else %}
+                                <div class="no-poster">
+                                    No Poster
+                                </div>
+                            {% endif %}
+
+                            <span class="source-pill">
+                                {{ movie.source }}
+                            </span>
+
+                        </div>
+
+                        <div class="card-content">
+
+                            <h3 title="{{ movie.title }}">
+                                {{ movie.title }}
+                            </h3>
+
+                            <div class="card-meta">
+                                <span>
+                                    📅 {{ movie.year or "N/A" }}
+                                </span>
+                                <span>
+                                    🌐 {{ movie.language or "Unknown" }}
+                                </span>
+                                <span>
+                                    ⭐ {{ movie.rating }}
+                                </span>
+                            </div>
+
+                            {% if movie.match_score is defined and movie.match_score %}
+                                <div class="match-score">
+                                    Match {{ movie.match_score }}%
+                                </div>
+                            {% endif %}
+
+                        </div>
+
+                    </article>
+
+                </a>
+
+            {% endfor %}
+
+        </div>
+
+    </section>
+    {% endif %}
+
+
+    <!-- =====================================================
+         2026 HOMEPAGE SECTIONS
+    ====================================================== -->
+
+    <div class="homepage-sections">
+
+        <!-- TRENDING -->
+        {% if home_sections.trending %}
+        <section class="home-section">
+
+            <div class="section-heading">
+                <div>
+                    <span class="section-kicker">
+                        WHAT'S NEW
+                    </span>
+
+                    <h2>
+                        🔥 Trending & New — 2026
+                    </h2>
+                </div>
+
+                <span class="section-count">
+                    {{ home_sections.trending | length }}
+                </span>
+            </div>
+
+            <div class="movie-grid">
+                {% for movie in home_sections.trending %}
+                    {% include "movie_card.html" %}
+                {% endfor %}
+            </div>
+
+        </section>
+        {% endif %}
+
+
+        <!-- RECENT -->
+        {% if home_sections.recent %}
+        <section class="home-section">
+
+            <div class="section-heading">
+                <div>
+                    <span class="section-kicker">
+                        JUST DROPPED
+                    </span>
+
+                    <h2>
+                        🆕 Recent Releases — 2026
+                    </h2>
+                </div>
+
+                <span class="section-count">
+                    {{ home_sections.recent | length }}
+                </span>
+            </div>
+
+            <div class="movie-grid">
+                {% for movie in home_sections.recent %}
+                    {% include "movie_card.html" %}
+                {% endfor %}
+            </div>
+
+        </section>
+        {% endif %}
+
+
+        <!-- MYSTERY -->
+        {% if home_sections.mystery %}
+        <section class="home-section">
+
+            <div class="section-heading">
+                <div>
+                    <span class="section-kicker">
+                        DARK • TWISTY • INTENSE
+                    </span>
+
+                    <h2>
+                        🕵️ Mystery & Thriller — 2026
+                    </h2>
+                </div>
+
+                <span class="section-count">
+                    {{ home_sections.mystery | length }}
+                </span>
+            </div>
+
+            <div class="movie-grid">
+                {% for movie in home_sections.mystery %}
+                    {% include "movie_card.html" %}
+                {% endfor %}
+            </div>
+
+        </section>
+        {% endif %}
+
+
+        <!-- BOLLYWOOD -->
+        {% if home_sections.bollywood %}
+        <section class="home-section">
+
+            <div class="section-heading">
+                <div>
+                    <span class="section-kicker">
+                        DESI • HINDI • BOLLYWOOD
+                    </span>
+
+                    <h2>
+                        🇮🇳 Bollywood — 2026
+                    </h2>
+                </div>
+
+                <span class="section-count">
+                    {{ home_sections.bollywood | length }}
+                </span>
+            </div>
+
+            <div class="movie-grid">
+                {% for movie in home_sections.bollywood %}
+                    {% include "movie_card.html" %}
+                {% endfor %}
+            </div>
+
+        </section>
+        {% endif %}
+
+
+        <!-- SOUTH -->
+        {% if home_sections.south %}
+        <section class="home-section">
+
+            <div class="section-heading">
+                <div>
+                    <span class="section-kicker">
+                        TAMIL • TELUGU • MALAYALAM • KANNADA
+                    </span>
+
+                    <h2>
+                        🎬 South Indian Cinema — 2026
+                    </h2>
+                </div>
+
+                <span class="section-count">
+                    {{ home_sections.south | length }}
+                </span>
+            </div>
+
+            <div class="movie-grid">
+                {% for movie in home_sections.south %}
+                    {% include "movie_card.html" %}
+                {% endfor %}
+            </div>
+
+        </section>
+        {% endif %}
+
+
+        <!-- ENGLISH -->
+        {% if home_sections.english %}
+        <section class="home-section">
+
+            <div class="section-heading">
+                <div>
+                    <span class="section-kicker">
+                        ENGLISH • GLOBAL
+                    </span>
+
+                    <h2>
+                        🇺🇸 English Movies — 2026
+                    </h2>
+                </div>
+
+                <span class="section-count">
+                    {{ home_sections.english | length }}
+                </span>
+            </div>
+
+            <div class="movie-grid">
+                {% for movie in home_sections.english %}
+                    {% include "movie_card.html" %}
+                {% endfor %}
+            </div>
+
+        </section>
+        {% endif %}
+
+
+        <!-- ANIMATION -->
+        {% if home_sections.animation %}
+        <section class="home-section">
+
+            <div class="section-heading">
+                <div>
+                    <span class="section-kicker">
+                        FAMILY • KIDS • CARTOONS
+                    </span>
+
+                    <h2>
+                        🎨 Animation & Cartoons — 2026
+                    </h2>
+                </div>
+
+                <span class="section-count">
+                    {{ home_sections.animation | length }}
+                </span>
+            </div>
+
+            <div class="movie-grid">
+                {% for movie in home_sections.animation %}
+                    {% include "movie_card.html" %}
+                {% endfor %}
+            </div>
+
+        </section>
+        {% endif %}
+
+    </div>
+
+</main>
+
+
+<footer class="site-footer">
+    <div>
+        <strong>WatchKaro</strong>
+        <span>Hybrid AI + TMDB movie discovery</span>
+    </div>
+
+    <div>
+        <span>Local dataset: 78k+ movies</span>
+        <span>•</span>
+        <span>TMDB live discovery</span>
+    </div>
+</footer>
+
+
+<script
+    src="{{ url_for('static', filename='script.js') }}"
+></script>
+
+</body>
+</html>
