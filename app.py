@@ -1278,12 +1278,10 @@ def recommendation():
         selected_source = request.form.get("source", selected_source).strip().upper()
         selected_tmdb_id = request.form.get("tmdb_id", selected_tmdb_id).strip()
 
+    # Empty submission: return to the normal homepage instead of showing
+    # the red error box. This also makes clicking Recommend with no title harmless.
     if not title:
-        return render_template(
-            "index.html", selected_movie=None, recommendations=[], search_results=[],
-            selected_media_type=None, error="Please enter a movie or TV series name.",
-            notice=None, home_sections=get_home_sections(),
-        )
+        return redirect(url_for("home"))
 
     tmdb_results = list(cached_tmdb_search(normalize_search_text(title)))
     selected_tmdb = None
@@ -1358,6 +1356,36 @@ def recommendation():
         search_results=[], selected_media_type="movie", error=None, notice=None,
         home_sections=get_home_sections(),
     )
+
+
+# ============================================================
+# GLOBAL ERROR HANDLER
+# ============================================================
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(exc):
+    # Keep production users away from Flask's plain 500 page. Log the real
+    # exception in Render logs while returning the normal WatchKaro homepage.
+    import traceback
+    print("WATCHKARO REQUEST ERROR:", repr(exc))
+    traceback.print_exc()
+    try:
+        sections = get_home_sections()
+    except Exception:
+        sections = {
+            "trending": [], "recent": [], "drama": [],
+            "horror": [], "bollywood": [], "hollywood": [],
+        }
+    return render_template(
+        "index.html",
+        selected_movie=None,
+        recommendations=[],
+        search_results=[],
+        selected_media_type=None,
+        error=None,
+        notice=None,
+        home_sections=sections,
+    ), 200
 
 
 # ============================================================
