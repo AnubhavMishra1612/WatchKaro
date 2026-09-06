@@ -15,11 +15,10 @@
 # - Live 2026 homepage sections
 # - 2026 Trending & New
 # - 2026 Recent Releases
-# - 2026 Mystery & Thriller
+# - 2026 Drama
+# - 2026 Horror
 # - 2026 Bollywood
-# - 2026 South Indian Cinema
-# - 2026 English Movies
-# - 2026 Animation & Cartoons
+# - 2026 Hollywood
 # - Safe Pandas / NumPy -> JSON conversion
 # - Request caching
 # - TMDB caching
@@ -28,11 +27,8 @@
 #
 # IMPORTANT
 # ------------------------------------------------------------
-# final_recommender.py is not required.
-# tmdb_api.py is still used for TMDB search/recommendations.
-# TMDB homepage discovery is handled safely in this file so
-# this app does not depend on a new helper being added to
-# tmdb_api.py.
+# final_recommender.py and tmdb_api.py are not required.
+# All movie data and recommendations come directly from TMDB.
 # ============================================================
 
 
@@ -103,15 +99,73 @@ else:
 
 
 # ============================================================
-# EXISTING PROJECT MODULES
+# TMDB API HELPERS — SELF CONTAINED
 # ============================================================
 
-from tmdb_api import (
-    search_movies as tmdb_search_movies,
-    get_movie_recommendations,
-    get_movie_details,
-    get_poster_url,
-)
+# This app talks directly to TMDB. No tmdb_api.py, CSV, or local
+# recommendation module is required.
+
+def tmdb_get(path, params=None, timeout=15):
+    if not TMDB_API_KEY and not TMDB_ACCESS_TOKEN:
+        raise RuntimeError(
+            "TMDB_API_KEY or TMDB_ACCESS_TOKEN is not configured."
+        )
+
+    request_params = dict(params or {})
+    headers = dict(TMDB_HEADERS)
+
+    # TMDB v3 accepts api_key as a query parameter.
+    if TMDB_API_KEY and not TMDB_ACCESS_TOKEN:
+        request_params["api_key"] = TMDB_API_KEY
+
+    response = requests.get(
+        f"{TMDB_BASE_URL}{path}",
+        headers=headers,
+        params=request_params,
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def get_movie_recommendations(tmdb_id, page=1):
+    payload = tmdb_get(
+        f"/movie/{int(tmdb_id)}/recommendations",
+        params={"language": "en-US", "page": page},
+    )
+    return payload.get("results", []) or []
+
+
+def get_movie_details(tmdb_id):
+    return tmdb_get(
+        f"/movie/{int(tmdb_id)}",
+        params={"language": "en-US", "append_to_response": "keywords,credits"},
+    )
+
+
+def search_movies(query, page=1):
+    payload = tmdb_get(
+        "/search/multi",
+        params={
+            "query": query,
+            "language": "en-US",
+            "include_adult": "false",
+            "page": page,
+        },
+    )
+    return payload.get("results", []) or []
+
+
+def get_poster_url(path):
+    if not path:
+        return ""
+    if str(path).startswith("http"):
+        return str(path)
+    return f"{TMDB_IMAGE_BASE}{path}"
+
+
+# Compatibility name used by the search cache below.
+tmdb_search_movies = search_movies
 
 
 # ============================================================
@@ -279,28 +333,6 @@ print("=" * 70)
 print("WATCHKARO — TMDB ONLY MODE")
 print("Local clean_movies.csv: DISABLED")
 print("=" * 70)
-
-
-# ============================================================
-# TMDB HELPERS
-# ============================================================
-
-def tmdb_get(path, params=None, timeout=15):
-    if not TMDB_API_KEY and not TMDB_ACCESS_TOKEN:
-        raise RuntimeError(
-            "TMDB credentials are not configured in .env"
-        )
-
-    response = requests.get(
-        f"{TMDB_BASE_URL}{path}",
-        headers=TMDB_HEADERS,
-        params=params or {},
-        timeout=timeout,
-    )
-
-    response.raise_for_status()
-
-    return response.json()
 
 
 @lru_cache(maxsize=TMDB_DISCOVERY_CACHE_SIZE)
@@ -872,7 +904,7 @@ def smart_tmdb_recommendations(tmdb_id, limit=20):
 
         # Fetch credits for candidate movies so actor/director overlap is
         # a real signal instead of relying only on title/overview text.
-        candidate_details = _tmdb_details_cached(movie_id)
+        candidate_details = _tmdb_details_cached(safe_string(movie.get("id", "")))
         if candidate_details:
             movie = dict(movie)
             movie.update({
@@ -904,6 +936,14 @@ def smart_tmdb_recommendations(tmdb_id, limit=20):
         genre_overlap = len(profile["genre_ids"].intersection(candidate_genres))
 
         language = safe_string(movie.get("original_language", "")).lower()
+
+        # Strict language guard: never mix English/Hollywood candidates into
+        # an Indian-language request, and never mix Indian-language movies
+        # into an English request. Unknown language is allowed only when TMDB
+        # did not provide it.
+        if profile["language"] and language and language != profile["language"]:
+            continue
+
         lang_score = 16.0 if profile["language"] and language == profile["language"] else 0.0
         if profile["language"] in {"hi", "ta", "te", "ml", "kn"} and language in {"hi", "ta", "te", "ml", "kn"}:
             lang_score = max(lang_score, 8.0)
@@ -962,6 +1002,78 @@ def smart_tmdb_recommendations(tmdb_id, limit=20):
     print("=" * 60)
 
     return tuple(top)
+
+# ============================================================
+# MOVIE NORMALIZATION FOR THE EXISTING HTML
+# ============================================================
+
+def movie_to_dict(movie):
+    """Convert any TMDB movie/TV dictionary into the fields index.html uses."""
+    if isinstance(movie, pd.Series):
+        movie = movie.to_dict()
+    if not isinstance(movie, dict):
+        return {
+            "title": "Unknown", "name": "Unknown", "tmdb_id": "",
+            "media_type": "movie", "source": "TMDB", "poster": "",
+            "year": "", "language": "Unknown", "rating": 0,
+            "genres": "", "overview": "", "cast": "", "director": "",
+        }
+
+    media_type = safe_string(movie.get("media_type", "movie")).lower()
+    title = safe_string(movie.get("title") or movie.get("name") or "Unknown")
+    release_date = safe_string(movie.get("release_date") or movie.get("first_air_date") or "")
+    year = release_date[:4] if release_date[:4].isdigit() else ""
+    language_code = safe_string(movie.get("original_language") or "").lower()
+
+    genres = movie.get("genres") or []
+    if isinstance(genres, list):
+        genre_names = [
+            safe_string(g.get("name"))
+            for g in genres
+            if isinstance(g, dict) and safe_string(g.get("name"))
+        ]
+    else:
+        genre_names = []
+
+    cast_names = []
+    director_names = []
+    credits = movie.get("credits") or {}
+    if isinstance(credits, dict):
+        cast = credits.get("cast") or []
+        crew = credits.get("crew") or []
+        cast_names = [
+            safe_string(p.get("name"))
+            for p in cast[:6]
+            if isinstance(p, dict) and safe_string(p.get("name"))
+        ]
+        director_names = [
+            safe_string(p.get("name"))
+            for p in crew
+            if isinstance(p, dict)
+            and safe_string(p.get("job")).lower() == "director"
+            and safe_string(p.get("name"))
+        ][:2]
+
+    return {
+        "title": title,
+        "name": title,
+        "tmdb_id": safe_string(movie.get("id") or movie.get("tmdb_id") or ""),
+        "id": movie.get("id"),
+        "media_type": media_type or "movie",
+        "source": safe_string(movie.get("source") or "TMDB"),
+        "poster": get_poster_url(movie.get("poster_path") or movie.get("poster")),
+        "year": year,
+        "language": get_language_name(language_code),
+        "language_code": language_code,
+        "rating": round(safe_float(movie.get("vote_average"), 0.0), 1),
+        "genres": ", ".join(genre_names),
+        "overview": safe_string(movie.get("overview")),
+        "cast": ", ".join(cast_names),
+        "director": ", ".join(director_names),
+        "popularity": safe_float(movie.get("popularity"), 0.0),
+        "match_score": movie.get("match_score"),
+    }
+
 
 # ============================================================
 # RECOMMENDATION NORMALIZATION
@@ -1043,6 +1155,80 @@ def prepare_recommendations(
 
 
 # ============================================================
+# TMDB HOMEPAGE SECTIONS
+# ============================================================
+
+HOME_SECTIONS = {
+    "trending": [],
+    "recent": [],
+    "drama": [],
+    "horror": [],
+    "bollywood": [],
+    "hollywood": [],
+}
+
+
+def discover_home_section(genre_ids="", original_language="", sort_by="popularity.desc", vote_count_gte=5):
+    today = date.today().isoformat()
+    params = {
+        "language": "en-US",
+        "page": 1,
+        "include_adult": "false",
+        "include_video": "false",
+        "primary_release_date.gte": f"{HOME_YEAR}-01-01",
+        "primary_release_date.lte": today,
+        "sort_by": sort_by,
+        "vote_count.gte": vote_count_gte,
+    }
+    if genre_ids:
+        params["with_genres"] = genre_ids
+    if original_language:
+        params["with_original_language"] = original_language
+
+    try:
+        payload = tmdb_get("/discover/movie", params=params, timeout=15)
+        results = []
+        for movie in payload.get("results", [])[:HOME_SECTION_LIMIT]:
+            if isinstance(movie, dict):
+                movie = dict(movie)
+                movie["media_type"] = "movie"
+                movie["source"] = "TMDB"
+                results.append(movie_to_dict(movie))
+        return results
+    except Exception as exc:
+        print("Homepage discovery error:", repr(exc))
+        return []
+
+
+def build_home_sections():
+    jobs = {
+        "trending": dict(sort_by="popularity.desc", vote_count_gte=5),
+        "recent": dict(sort_by="primary_release_date.desc", vote_count_gte=3),
+        "drama": dict(genre_ids="18", sort_by="popularity.desc", vote_count_gte=5),
+        "horror": dict(genre_ids="27", sort_by="popularity.desc", vote_count_gte=5),
+        "bollywood": dict(original_language="hi", sort_by="popularity.desc", vote_count_gte=5),
+        "hollywood": dict(original_language="en", sort_by="popularity.desc", vote_count_gte=10),
+    }
+    home = {key: [] for key in jobs}
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        future_map = {executor.submit(discover_home_section, **config): key for key, config in jobs.items()}
+        for future in as_completed(future_map):
+            key = future_map[future]
+            try:
+                home[key] = future.result()
+            except Exception as exc:
+                print(f"Homepage section {key} failed:", repr(exc))
+    return home
+
+
+def get_home_sections():
+    global HOME_SECTIONS
+    if not any(HOME_SECTIONS.values()):
+        HOME_SECTIONS = build_home_sections()
+    return HOME_SECTIONS
+
+
+# ============================================================
 # SEARCH ROUTE
 # ============================================================
 
@@ -1066,7 +1252,7 @@ def home():
         selected_media_type=None,
         error=None,
         notice=None,
-        home_sections=HOME_SECTIONS,
+        home_sections=get_home_sections(),
     )
 
 
@@ -1096,7 +1282,7 @@ def recommendation():
         return render_template(
             "index.html", selected_movie=None, recommendations=[], search_results=[],
             selected_media_type=None, error="Please enter a movie or TV series name.",
-            notice=None, home_sections=HOME_SECTIONS,
+            notice=None, home_sections=get_home_sections(),
         )
 
     tmdb_results = list(cached_tmdb_search(normalize_search_text(title)))
@@ -1129,10 +1315,22 @@ def recommendation():
             "index.html", selected_movie=None, recommendations=[], search_results=[],
             selected_media_type=None,
             error=f"'{title}' was not found on TMDB.", notice=None,
-            home_sections=HOME_SECTIONS,
+            home_sections=get_home_sections(),
         )
 
-    selected_movie = movie_to_dict(selected_tmdb)
+    # Fetch full metadata once the user has selected a title. This supplies
+    # cast/director/genres/overview while keeping the app completely TMDB-only.
+    selected_full = selected_tmdb
+    if safe_string(selected_tmdb.get("media_type", "movie")) == "movie":
+        selected_id = safe_string(selected_tmdb.get("id", ""))
+        if selected_id:
+            full_details = _tmdb_details_cached(selected_id)
+            if full_details:
+                selected_full = dict(selected_tmdb)
+                selected_full.update(full_details)
+                selected_full["media_type"] = "movie"
+
+    selected_movie = movie_to_dict(selected_full)
     selected_movie["source"] = "TMDB"
     media_type = selected_movie.get("media_type", "movie")
 
@@ -1141,7 +1339,7 @@ def recommendation():
             "index.html", selected_movie=selected_movie, recommendations=[], search_results=[],
             selected_media_type="tv", error=None,
             notice="This is a TV series. TV recommendations are not enabled yet.",
-            home_sections=HOME_SECTIONS,
+            home_sections=get_home_sections(),
         )
 
     tmdb_id = safe_string(selected_movie.get("tmdb_id", ""))
@@ -1158,7 +1356,7 @@ def recommendation():
     return render_template(
         "index.html", selected_movie=selected_movie, recommendations=recommendations,
         search_results=[], selected_media_type="movie", error=None, notice=None,
-        home_sections=HOME_SECTIONS,
+        home_sections=get_home_sections(),
     )
 
 
@@ -1173,7 +1371,7 @@ def health():
         "data_source": "TMDB",
         "local_dataset_required": False,
         "home_sections": {
-            name: len(HOME_SECTIONS[name])
+            name: len(get_home_sections()[name])
             for name in ("trending", "recent", "drama", "horror", "bollywood", "hollywood")
         },
         "cache": {
