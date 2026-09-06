@@ -6,11 +6,11 @@
 #
 # Features
 # ------------------------------------------------------------
-# - 78k+ local movie dataset search
+# - TMDB-only movie search
 # - Exact / tolerant / prefix / contains / fuzzy title search
 # - TMDB movie + TV search
 # - Correct movie / TV selection handling
-# - V4 local recommendation engine
+# - TMDB metadata-based recommendation engine
 # - TMDB recommendations for TMDB-only movies
 # - Live 2026 homepage sections
 # - 2026 Trending & New
@@ -23,13 +23,13 @@
 # - Safe Pandas / NumPy -> JSON conversion
 # - Request caching
 # - TMDB caching
-# - Graceful TMDB fallback to local 2026 data
+# - No local dataset dependency
 # - Health endpoint
 #
 # IMPORTANT
 # ------------------------------------------------------------
-# final_recommender.py is NOT modified.
-# tmdb_api.py is still used for search/recommendations.
+# final_recommender.py is not required.
+# tmdb_api.py is still used for TMDB search/recommendations.
 # TMDB homepage discovery is handled safely in this file so
 # this app does not depend on a new helper being added to
 # tmdb_api.py.
@@ -73,19 +73,12 @@ app = Flask(__name__)
 # PROJECT CONFIGURATION
 # ============================================================
 
-DATA_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "data",
-    "clean_movies.csv",
-)
-
 SEARCH_LIMIT = 10
 HOME_SECTION_LIMIT = 10
 
 TMDB_MIN_CHARS = 3
 
 SEARCH_CACHE_SIZE = 512
-V4_CACHE_SIZE = 256
 TMDB_SEARCH_CACHE_SIZE = 256
 TMDB_RECOMMENDATION_CACHE_SIZE = 256
 TMDB_DISCOVERY_CACHE_SIZE = 64
@@ -112,32 +105,6 @@ else:
 # ============================================================
 # EXISTING PROJECT MODULES
 # ============================================================
-
-# ------------------------------------------------------------
-# Render compatibility for older final_recommender.py
-# ------------------------------------------------------------
-# Some older copies of final_recommender.py still contain the
-# Windows-only path C:\movie-recommender\data\clean_movies.csv.
-# During its import, redirect only that legacy path to this
-# deployment-safe dataset path, then restore pandas.read_csv.
-_original_read_csv = pd.read_csv
-
-def _render_read_csv(filepath_or_buffer, *args, **kwargs):
-    if isinstance(filepath_or_buffer, (str, os.PathLike)):
-        raw_path = os.path.normpath(os.fspath(filepath_or_buffer))
-        legacy_path = os.path.normpath(
-            r"C:\movie-recommender\data\clean_movies.csv"
-        )
-        if raw_path.lower() == legacy_path.lower():
-            filepath_or_buffer = DATA_PATH
-    return _original_read_csv(filepath_or_buffer, *args, **kwargs)
-
-pd.read_csv = _render_read_csv
-try:
-    from final_recommender import recommend as v4_recommend
-finally:
-    pd.read_csv = _original_read_csv
-
 
 from tmdb_api import (
     search_movies as tmdb_search_movies,
@@ -297,433 +264,21 @@ def get_search_query(normalized_query):
 
 
 # ============================================================
-# LOAD LOCAL DATASET
+# TMDB-ONLY DATA SOURCE
+# ============================================================
+# No local CSV is loaded. WatchKaro is fully powered by TMDB.
 # ============================================================
 
-print()
-print("=" * 70)
-print("LOADING LOCAL MOVIE DATASET")
-print("=" * 70)
-
-load_start = time.perf_counter()
-
-if not os.path.exists(DATA_PATH):
-    raise FileNotFoundError(
-        f"Dataset not found:\n{DATA_PATH}"
-    )
-
-df = pd.read_csv(DATA_PATH)
-
-load_time = time.perf_counter() - load_start
-
-print(f"Movies loaded : {len(df):,}")
-print(f"Load time     : {load_time:.2f} seconds")
-
-if "title" not in df.columns:
-    raise ValueError(
-        "Required dataset column missing: title"
-    )
-
-
-# ============================================================
-# BUILD FAST SEARCH INDEX
-# ============================================================
-
-print()
-print("Building fast search index...")
-
-search_index_start = time.perf_counter()
-
-_search_work = df["title"].fillna("").astype(str)
-
-SEARCH_RECORDS = sorted(
-    (
-        normalize_search_text(title),
-        index,
-    )
-    for index, title in _search_work.items()
-    if normalize_search_text(title)
-)
-
-SORTED_SEARCH_TITLES = [
-    item[0]
-    for item in SEARCH_RECORDS
-]
-
+SEARCH_RECORDS = []
+SORTED_SEARCH_TITLES = []
 EXACT_INDEX = {}
 MATCH_KEY_INDEX = {}
 
-for position, (title_text, idx) in enumerate(
-    SEARCH_RECORDS
-):
-    EXACT_INDEX.setdefault(
-        title_text,
-        [],
-    ).append(idx)
-
-    MATCH_KEY_INDEX.setdefault(
-        make_match_key(title_text),
-        [],
-    ).append(idx)
-
-print(
-    f"Search index ready : {len(SEARCH_RECORDS):,} titles"
-)
-
-print(
-    "Index build time   : "
-    f"{time.perf_counter() - search_index_start:.2f} seconds"
-)
-
-
-# ============================================================
-# LOCAL SEARCH
-# ============================================================
-
-@lru_cache(maxsize=SEARCH_CACHE_SIZE)
-def _local_search_cached(
-    normalized_query,
-    limit,
-):
-    if not normalized_query:
-        return tuple()
-
-    matches = {}
-
-    # --------------------------------------------------------
-    # Exact
-    # --------------------------------------------------------
-
-    for idx in EXACT_INDEX.get(
-        normalized_query,
-        [],
-    ):
-        matches[idx] = 2_000_000
-
-    # --------------------------------------------------------
-    # Tolerant exact
-    # --------------------------------------------------------
-
-    query_key = make_match_key(
-        normalized_query
-    )
-
-    for idx in MATCH_KEY_INDEX.get(
-        query_key,
-        [],
-    ):
-        matches.setdefault(
-            idx,
-            1_900_000,
-        )
-
-    # --------------------------------------------------------
-    # Prefix
-    # --------------------------------------------------------
-
-    start_position = bisect_left(
-        SORTED_SEARCH_TITLES,
-        normalized_query,
-    )
-
-    for position in range(
-        start_position,
-        len(SEARCH_RECORDS),
-    ):
-        title_text, idx = (
-            SEARCH_RECORDS[position]
-        )
-
-        if not title_text.startswith(
-            normalized_query
-        ):
-            break
-
-        matches.setdefault(
-            idx,
-            1_000_000,
-        )
-
-    # --------------------------------------------------------
-    # Word start
-    # --------------------------------------------------------
-
-    query_words = normalized_query.split()
-
-    for title_text, idx in SEARCH_RECORDS:
-        if idx in matches:
-            continue
-
-        title_words = title_text.split()
-
-        if any(
-            any(
-                word.startswith(query_word)
-                for word in title_words
-            )
-            for query_word in query_words
-        ):
-            matches[idx] = 800_000
-
-    # --------------------------------------------------------
-    # Contains
-    # --------------------------------------------------------
-
-    for title_text, idx in SEARCH_RECORDS:
-        if idx in matches:
-            continue
-
-        if normalized_query in title_text:
-            matches[idx] = 600_000
-
-    # --------------------------------------------------------
-    # Fuzzy fallback
-    # --------------------------------------------------------
-
-    if not matches:
-        for title_text, idx in SEARCH_RECORDS:
-            similarity = SequenceMatcher(
-                None,
-                get_search_query(normalized_query),
-                title_text,
-            ).ratio()
-
-            if similarity >= 0.78:
-                matches[idx] = (
-                    300_000
-                    + int(similarity * 100_000)
-                )
-
-    # --------------------------------------------------------
-    # Rank
-    # --------------------------------------------------------
-
-    ranked = sorted(
-        matches.items(),
-        key=lambda pair: (
-            pair[1],
-            safe_float(
-                df.iloc[pair[0]].get(
-                    "vote_count",
-                    0,
-                )
-            ),
-            safe_float(
-                df.iloc[pair[0]].get(
-                    "popularity",
-                    0,
-                )
-            ),
-        ),
-        reverse=True,
-    )
-
-    return tuple(
-        pair[0]
-        for pair in ranked[:limit]
-    )
-
-
-def movie_to_dict(movie):
-    """
-    Convert DataFrame Series / dict / TMDB movie into
-    JSON-safe frontend data.
-    """
-
-    def value_from(keys, default=""):
-        if isinstance(movie, pd.Series):
-            for key in keys:
-                if key in movie.index:
-                    value = movie[key]
-                    if not pd.isna(value):
-                        return value
-            return default
-
-        if isinstance(movie, dict):
-            for key in keys:
-                if key in movie:
-                    value = movie[key]
-                    if value is not None:
-                        return value
-            return default
-
-        return default
-
-    title = safe_string(
-        value_from(
-            ["title", "name"],
-            "",
-        )
-    ).strip()
-
-    release_date = safe_string(
-        value_from(
-            ["release_date", "first_air_date"],
-            "",
-        )
-    ).strip()
-
-    year = release_date[:4] if release_date else ""
-
-    language_code = safe_string(
-        value_from(
-            [
-                "original_language",
-                "language_code",
-                "language",
-            ],
-            "",
-        )
-    ).lower().strip()
-
-    language = (
-        get_language_name(language_code)
-        if language_code
-        else safe_string(
-            value_from(["language"], "Unknown")
-        )
-    )
-
-    genres = safe_string(
-        value_from(
-            ["genres"],
-            "",
-        )
-    ).strip()
-
-    rating = safe_float(
-        value_from(
-            ["vote_average", "rating"],
-            0,
-        )
-    )
-
-    votes = safe_int(
-        value_from(
-            ["vote_count", "votes"],
-            0,
-        )
-    )
-
-    popularity = safe_float(
-        value_from(
-            ["popularity"],
-            0,
-        )
-    )
-
-    overview = safe_string(
-        value_from(
-            ["overview"],
-            "",
-        )
-    ).strip()
-
-    poster_path = safe_string(
-        value_from(
-            ["poster_path"],
-            "",
-        )
-    ).strip()
-
-    poster = safe_string(
-        value_from(
-            ["poster"],
-            "",
-        )
-    ).strip()
-
-    tmdb_id = value_from(
-        ["tmdb_id", "id"],
-        "",
-    )
-
-    if isinstance(tmdb_id, float) and pd.isna(tmdb_id):
-        tmdb_id = ""
-
-    try:
-        if safe_string(tmdb_id).strip().isdigit():
-            tmdb_id = int(
-                safe_string(tmdb_id).strip()
-            )
-    except Exception:
-        pass
-
-    media_type = safe_string(
-        value_from(
-            ["media_type"],
-            "movie",
-        )
-    ).lower()
-
-    if media_type not in {"movie", "tv"}:
-        media_type = "movie"
-
-    source = safe_string(
-        value_from(
-            ["source"],
-            "LOCAL",
-        )
-    ).upper()
-
-    if not poster and poster_path:
-        try:
-            poster = (
-                get_poster_url(poster_path)
-                if poster_path.startswith("/")
-                else poster_path
-            )
-        except Exception:
-            if poster_path.startswith("http"):
-                poster = poster_path
-
-    return {
-        "title": title,
-        "year": year,
-        "release_date": release_date,
-        "language": language,
-        "language_code": language_code,
-        "genres": genres,
-        "rating": round(rating, 1),
-        "votes": votes,
-        "popularity": round(popularity, 2),
-        "overview": overview,
-        "poster": poster,
-        "poster_path": poster_path,
-        "tmdb_id": tmdb_id,
-        "media_type": media_type,
-        "source": source,
-    }
-
-
-def search_movies(query, limit=SEARCH_LIMIT):
-    normalized_query = normalize_search_text(query)
-
-    if not normalized_query:
-        return []
-
-    corrected_query = get_search_query(
-        normalized_query
-    )
-
-    indices = _local_search_cached(
-        corrected_query,
-        limit,
-    )
-
-    results = []
-
-    for idx in indices:
-        movie = movie_to_dict(
-            df.iloc[idx]
-        )
-
-        movie["source"] = "LOCAL"
-        movie["media_type"] = "movie"
-
-        results.append(movie)
-
-    return results
+print()
+print("=" * 70)
+print("WATCHKARO — TMDB ONLY MODE")
+print("Local clean_movies.csv: DISABLED")
+print("=" * 70)
 
 
 # ============================================================
@@ -1034,17 +589,30 @@ def _tmdb_text_words(text):
     return set(re.findall(r"[a-z0-9]+", safe_string(text).lower()))
 
 
+@lru_cache(maxsize=TMDB_RECOMMENDATION_CACHE_SIZE * 2)
 def _tmdb_details_cached(tmdb_id):
-    """Get full selected-movie details, including TMDB keywords."""
+    """Get full TMDB movie details, including keywords and credits."""
     if not tmdb_id:
         return {}
 
     try:
-        details = get_movie_details(int(tmdb_id))
+        # One request gives us genres, keywords, cast and crew.
+        details = tmdb_get(
+            f"/movie/{int(tmdb_id)}",
+            params={
+                "language": "en-US",
+                "append_to_response": "keywords,credits",
+            },
+            timeout=15,
+        )
         return details if isinstance(details, dict) else {}
     except Exception as exc:
         print("TMDB details error:", repr(exc))
-        return {}
+        try:
+            details = get_movie_details(int(tmdb_id))
+            return details if isinstance(details, dict) else {}
+        except Exception:
+            return {}
 
 
 def _extract_tmdb_profile(details):
@@ -1098,6 +666,34 @@ def _extract_tmdb_profile(details):
         if profile_words.intersection(terms):
             active_themes.append(theme)
 
+    credits = details.get("credits") or {}
+    cast = credits.get("cast") or []
+    crew = credits.get("crew") or []
+    actor_ids = {
+        safe_int(person.get("id"), 0)
+        for person in cast[:12]
+        if isinstance(person, dict) and safe_int(person.get("id"), 0)
+    }
+    actor_names = {
+        safe_string(person.get("name", "")).lower()
+        for person in cast[:12]
+        if isinstance(person, dict) and safe_string(person.get("name", ""))
+    }
+    director_ids = {
+        safe_int(person.get("id"), 0)
+        for person in crew
+        if isinstance(person, dict)
+        and safe_string(person.get("job", "")).lower() == "director"
+        and safe_int(person.get("id"), 0)
+    }
+    director_names = {
+        safe_string(person.get("name", "")).lower()
+        for person in crew
+        if isinstance(person, dict)
+        and safe_string(person.get("job", "")).lower() == "director"
+        and safe_string(person.get("name", ""))
+    }
+
     return {
         "title": title,
         "overview": overview,
@@ -1109,6 +705,10 @@ def _extract_tmdb_profile(details):
         "keyword_ids": keyword_ids,
         "profile_words": profile_words,
         "active_themes": active_themes,
+        "actor_ids": actor_ids,
+        "actor_names": actor_names,
+        "director_ids": director_ids,
+        "director_names": director_names,
     }
 
 
@@ -1270,6 +870,21 @@ def smart_tmdb_recommendations(tmdb_id, limit=20):
         if not title_norm or title_norm == selected_title:
             continue
 
+        # Fetch credits for candidate movies so actor/director overlap is
+        # a real signal instead of relying only on title/overview text.
+        candidate_details = _tmdb_details_cached(movie_id)
+        if candidate_details:
+            movie = dict(movie)
+            movie.update({
+                "overview": candidate_details.get("overview", movie.get("overview", "")),
+                "original_language": candidate_details.get("original_language", movie.get("original_language", "")),
+            })
+
+        candidate_profile = _extract_tmdb_profile(candidate_details) if candidate_details else {
+            "actor_ids": set(), "actor_names": set(),
+            "director_ids": set(), "director_names": set(),
+        }
+
         candidate_words = _tmdb_text_words(" ".join([
             title,
             safe_string(movie.get("overview", "")),
@@ -1279,6 +894,13 @@ def smart_tmdb_recommendations(tmdb_id, limit=20):
             int(x) for x in (movie.get("genre_ids") or [])
             if str(x).isdigit()
         }
+        if candidate_details:
+            candidate_genres = candidate_profile.get("genre_ids", candidate_genres)
+
+        actor_overlap = len(profile["actor_ids"].intersection(candidate_profile.get("actor_ids", set())))
+        director_overlap = len(profile["director_ids"].intersection(candidate_profile.get("director_ids", set())))
+        actor_name_overlap = len(profile["actor_names"].intersection(candidate_profile.get("actor_names", set())))
+        director_name_overlap = len(profile["director_names"].intersection(candidate_profile.get("director_names", set())))
         genre_overlap = len(profile["genre_ids"].intersection(candidate_genres))
 
         language = safe_string(movie.get("original_language", "")).lower()
@@ -1289,6 +911,8 @@ def smart_tmdb_recommendations(tmdb_id, limit=20):
         profile_overlap = len(profile["profile_words"].intersection(candidate_words))
         text_score = min(profile_overlap * 2.0, 16.0)
         genre_score = min(genre_overlap, 3) * 12.0
+        actor_score = min(actor_overlap, 3) * 10.0 + min(actor_name_overlap, 2) * 4.0
+        director_score = min(director_overlap, 1) * 18.0 + min(director_name_overlap, 1) * 8.0
         query_score = min(item["query_weight"], 30.0)
 
         theme_score = 0.0
@@ -1312,6 +936,8 @@ def smart_tmdb_recommendations(tmdb_id, limit=20):
         total = (
             query_score
             + genre_score
+            + actor_score
+            + director_score
             + lang_score
             + text_score
             + theme_score
@@ -1336,421 +962,6 @@ def smart_tmdb_recommendations(tmdb_id, limit=20):
     print("=" * 60)
 
     return tuple(top)
-
-# ============================================================
-# HOME DATA HELPERS
-# ============================================================
-
-def get_local_2026_movies(
-    work,
-    limit=HOME_SECTION_LIMIT,
-    language_codes=None,
-    genre_terms=None,
-):
-    frame = work.copy()
-
-    mask = (
-        frame["_home_release_date"].notna()
-        & (
-            frame["_home_release_date"].dt.year
-            == HOME_YEAR
-        )
-        & (
-            frame["_home_release_date"]
-            <= pd.Timestamp(date.today())
-        )
-    )
-
-    if language_codes is not None:
-        if "original_language" in frame.columns:
-            languages = (
-                frame["original_language"]
-                .fillna("")
-                .astype(str)
-                .str.lower()
-            )
-
-            mask &= languages.isin(
-                language_codes
-            )
-
-    if genre_terms:
-        if "genres" in frame.columns:
-            genres = (
-                frame["genres"]
-                .fillna("")
-                .astype(str)
-                .str.lower()
-            )
-
-            genre_mask = pd.Series(
-                False,
-                index=frame.index,
-            )
-
-            for term in genre_terms:
-                genre_mask |= genres.str.contains(
-                    term,
-                    na=False,
-                )
-
-            mask &= genre_mask
-
-    filtered = frame[mask].copy()
-
-    filtered = filtered.sort_values(
-        [
-            "_home_release_date",
-            "_home_popularity",
-            "_home_rating",
-            "_home_votes",
-        ],
-        ascending=[
-            False,
-            False,
-            False,
-            False,
-        ],
-    )
-
-    return dataframe_to_home_movies(
-        filtered,
-        limit,
-    )
-
-
-def dataframe_to_home_movies(
-    frame,
-    limit=HOME_SECTION_LIMIT,
-):
-    if frame is None or frame.empty:
-        return []
-
-    work = frame.copy()
-
-    work["_home_title"] = (
-        work["title"]
-        .fillna("")
-        .astype(str)
-        .map(normalize_search_text)
-    )
-
-    work = work[
-        work["_home_title"] != ""
-    ]
-
-    work = work.drop_duplicates(
-        "_home_title"
-    )
-
-    work = work.head(limit)
-
-    results = []
-
-    for _, movie in work.iterrows():
-        data = movie_to_dict(movie)
-        data["source"] = "LOCAL"
-        data["media_type"] = "movie"
-        results.append(data)
-
-    return results
-
-
-def local_home_frame():
-    work = df.copy()
-
-    work["_home_popularity"] = pd.to_numeric(
-        work["popularity"]
-        if "popularity" in work.columns
-        else 0,
-        errors="coerce",
-    ).fillna(0)
-
-    work["_home_votes"] = pd.to_numeric(
-        work["vote_count"]
-        if "vote_count" in work.columns
-        else 0,
-        errors="coerce",
-    ).fillna(0)
-
-    work["_home_rating"] = pd.to_numeric(
-        work["vote_average"]
-        if "vote_average" in work.columns
-        else 0,
-        errors="coerce",
-    ).fillna(0)
-
-    if "release_date" in work.columns:
-        work["_home_release_date"] = pd.to_datetime(
-            work["release_date"],
-            errors="coerce",
-        )
-    else:
-        work["_home_release_date"] = pd.NaT
-
-    if "adult" in work.columns:
-        adult_values = (
-            work["adult"]
-            .astype(str)
-            .str.lower()
-        )
-
-        work = work[
-            adult_values != "true"
-        ]
-
-    return work
-
-
-# ============================================================
-# HOME SECTION DISCOVERY
-# ============================================================
-
-def discover_home_section(
-    name,
-    *,
-    genre_ids="",
-    original_language="",
-    sort_by="popularity.desc",
-    vote_count_gte=5,
-):
-    try:
-        print(
-            f"Loading 2026 {name} movies from TMDB..."
-        )
-
-        movies = discover_2026_movies(
-            genre_ids=genre_ids,
-            original_language=original_language,
-            sort_by=sort_by,
-            page=1,
-            vote_count_gte=vote_count_gte,
-        )
-
-        converted = [
-            movie_to_dict(movie)
-            for movie in movies[:HOME_SECTION_LIMIT]
-        ]
-
-        print(
-            f"2026 {name} loaded:",
-            len(converted),
-        )
-
-        return converted
-
-    except Exception as exc:
-        print(
-            f"TMDB {name} error:",
-            repr(exc),
-        )
-
-        return []
-
-
-def build_home_sections():
-    """
-    Build all homepage sections once when Flask starts.
-
-    Every 2026-labelled category is filtered to 2026.
-    TMDB is preferred; local 2026-only data is the fallback.
-    """
-
-    work = local_home_frame()
-
-    home = {
-        "trending": [],
-        "recent": [],
-        "mystery": [],
-        "bollywood": [],
-        "south": [],
-        "english": [],
-        "animation": [],
-    }
-
-    # --------------------------------------------------------
-    # TMDB discovery jobs
-    # --------------------------------------------------------
-
-    jobs = {
-        "trending": {
-            "name": "Trending & New",
-            "sort_by": "popularity.desc",
-            "vote_count_gte": 5,
-        },
-        "recent": {
-            "name": "Recent Releases",
-            "sort_by": "primary_release_date.desc",
-            "vote_count_gte": 3,
-        },
-        "mystery": {
-            "name": "Mystery & Thriller",
-            "genre_ids": "9648|53",
-            "sort_by": "popularity.desc",
-            "vote_count_gte": 10,
-        },
-        "bollywood": {
-            "name": "Bollywood",
-            "original_language": "hi",
-            "sort_by": "popularity.desc",
-            "vote_count_gte": 5,
-        },
-        "south": {
-            "name": "South Indian",
-            "original_language": "ta|te|ml|kn",
-            "sort_by": "popularity.desc",
-            "vote_count_gte": 5,
-        },
-        "english": {
-            "name": "English",
-            "original_language": "en",
-            "sort_by": "popularity.desc",
-            "vote_count_gte": 10,
-        },
-        "animation": {
-            "name": "Animation & Cartoons",
-            "genre_ids": "16",
-            "sort_by": "popularity.desc",
-            "vote_count_gte": 5,
-        },
-    }
-
-    print()
-    print("=" * 70)
-    print("BUILDING 2026 HOMEPAGE SECTIONS")
-    print("=" * 70)
-
-    with ThreadPoolExecutor(
-        max_workers=7
-    ) as executor:
-
-        future_map = {
-            executor.submit(
-                discover_home_section,
-                config["name"],
-                genre_ids=config.get(
-                    "genre_ids",
-                    "",
-                ),
-                original_language=config.get(
-                    "original_language",
-                    "",
-                ),
-                sort_by=config.get(
-                    "sort_by",
-                    "popularity.desc",
-                ),
-                vote_count_gte=config.get(
-                    "vote_count_gte",
-                    5,
-                ),
-            ): key
-            for key, config in jobs.items()
-        }
-
-        for future in as_completed(
-            future_map
-        ):
-            key = future_map[future]
-
-            try:
-                home[key] = future.result()
-            except Exception as exc:
-                print(
-                    f"Homepage section {key} failed:",
-                    repr(exc),
-                )
-                home[key] = []
-
-    # --------------------------------------------------------
-    # Local 2026 fallbacks
-    # --------------------------------------------------------
-
-    if not home["trending"]:
-        home["trending"] = get_local_2026_movies(
-            work,
-            HOME_SECTION_LIMIT,
-        )
-
-    if not home["recent"]:
-        home["recent"] = get_local_2026_movies(
-            work,
-            HOME_SECTION_LIMIT,
-        )
-
-    if not home["mystery"]:
-        home["mystery"] = get_local_2026_movies(
-            work,
-            HOME_SECTION_LIMIT,
-            genre_terms=["mystery", "thriller"],
-        )
-
-    if not home["bollywood"]:
-        home["bollywood"] = get_local_2026_movies(
-            work,
-            HOME_SECTION_LIMIT,
-            language_codes={"hi"},
-        )
-
-    if not home["south"]:
-        home["south"] = get_local_2026_movies(
-            work,
-            HOME_SECTION_LIMIT,
-            language_codes={
-                "ta",
-                "te",
-                "ml",
-                "kn",
-            },
-        )
-
-    if not home["english"]:
-        home["english"] = get_local_2026_movies(
-            work,
-            HOME_SECTION_LIMIT,
-            language_codes={"en"},
-        )
-
-    if not home["animation"]:
-        home["animation"] = get_local_2026_movies(
-            work,
-            HOME_SECTION_LIMIT,
-            genre_terms=["animation"],
-        )
-
-    return home
-
-
-# ============================================================
-# BUILD HOMEPAGE DATA ONCE
-# ============================================================
-
-home_start = time.perf_counter()
-
-HOME_SECTIONS = build_home_sections()
-
-print()
-print(
-    f"Homepage ready in "
-    f"{time.perf_counter() - home_start:.2f} seconds"
-)
-
-for section_name in (
-    "trending",
-    "recent",
-    "mystery",
-    "bollywood",
-    "south",
-    "english",
-    "animation",
-):
-    print(
-        f"{section_name.title():<15}: "
-        f"{len(HOME_SECTIONS[section_name])}"
-    )
-
-print("=" * 70)
-
 
 # ============================================================
 # RECOMMENDATION NORMALIZATION
@@ -1831,260 +1042,19 @@ def prepare_recommendations(
     return results
 
 
-@lru_cache(maxsize=V4_CACHE_SIZE)
-def cached_v4_recommendations(
-    title,
-):
-    return tuple(
-        v4_recommend(
-            title,
-            top_n=20,
-        )
-        or []
-    )
-
-
 # ============================================================
 # SEARCH ROUTE
 # ============================================================
 
 @app.route("/search")
 def search():
-    query = request.args.get(
-        "q",
-        "",
-    ).strip()
-
-    source = request.args.get(
-        "source",
-        "all",
-    ).strip().lower()
-
+    query = request.args.get("q", "").strip()
     if not query:
         return jsonify([])
 
-    normalized_query = normalize_search_text(
-        query
-    )
+    results = list(cached_tmdb_search(normalize_search_text(query)))
+    return jsonify([movie_to_dict(movie) for movie in results[:SEARCH_LIMIT]])
 
-    if not normalized_query:
-        return jsonify([])
-
-    corrected_query = get_search_query(
-        normalized_query
-    )
-
-    # --------------------------------------------------------
-    # Local only
-    # --------------------------------------------------------
-
-    if source == "local":
-        start = time.perf_counter()
-
-        results = search_movies(
-            corrected_query,
-            SEARCH_LIMIT,
-        )
-
-        print(
-            f"SEARCH LOCAL | '{query}' | "
-            f"{time.perf_counter() - start:.4f}s | "
-            f"{len(results)} results"
-        )
-
-        return jsonify(results)
-
-    # --------------------------------------------------------
-    # TMDB only
-    # --------------------------------------------------------
-
-    if source == "tmdb":
-        results = cached_tmdb_search(
-            corrected_query
-        )
-
-        output = [
-            movie_to_dict(movie)
-            for movie in results
-        ]
-
-        return jsonify(
-            output[:SEARCH_LIMIT]
-        )
-
-    # --------------------------------------------------------
-    # Local + TMDB
-    # --------------------------------------------------------
-
-    local_results = search_movies(
-        corrected_query,
-        SEARCH_LIMIT,
-    )
-
-    combined = []
-    seen = set()
-
-    for movie in local_results:
-        title_key = make_match_key(
-            movie.get(
-                "title",
-                "",
-            )
-        )
-
-        media_type = movie.get(
-            "media_type",
-            "movie",
-        )
-
-        key = (
-            title_key,
-            media_type,
-            "LOCAL",
-        )
-
-        if key in seen:
-            continue
-
-        seen.add(key)
-        combined.append(movie)
-
-    if len(corrected_query) >= TMDB_MIN_CHARS:
-        tmdb_results = cached_tmdb_search(
-            corrected_query
-        )
-
-        for raw_movie in tmdb_results:
-            movie = movie_to_dict(
-                raw_movie
-            )
-
-            title_key = make_match_key(
-                movie.get(
-                    "title",
-                    "",
-                )
-            )
-
-            media_type = movie.get(
-                "media_type",
-                "movie",
-            )
-
-            tmdb_id = safe_string(
-                movie.get(
-                    "tmdb_id",
-                    "",
-                )
-            )
-
-            key = (
-                title_key,
-                media_type,
-                tmdb_id,
-            )
-
-            if key in seen:
-                continue
-
-            seen.add(key)
-            combined.append(movie)
-
-    # --------------------------------------------------------
-    # Smart ranking
-    # --------------------------------------------------------
-
-    query_key = make_match_key(
-        corrected_query
-    )
-
-    def ranking(movie):
-        title = normalize_search_text(
-            movie.get(
-                "title",
-                "",
-            )
-        )
-
-        title_key = make_match_key(title)
-
-        if title == normalized_query:
-            score = 2_100_000
-
-        elif title == corrected_query:
-            score = 2_050_000
-
-        elif title_key == query_key:
-            score = 2_000_000
-
-        elif title.startswith(
-            normalized_query
-        ):
-            score = 1_000_000
-
-        elif any(
-            word.startswith(
-                normalized_query
-            )
-            for word in title.split()
-        ):
-            score = 800_000
-
-        elif normalized_query in title:
-            score = 600_000
-
-        else:
-            similarity = SequenceMatcher(
-                None,
-                corrected_query,
-                title,
-            ).ratio()
-
-            score = (
-                300_000
-                + similarity * 100_000
-                if similarity >= 0.78
-                else 0
-            )
-
-        if movie.get("source") == "TMDB":
-            score += 500
-
-        score += min(
-            safe_float(
-                movie.get(
-                    "popularity",
-                    0,
-                )
-            ),
-            100,
-        )
-
-        score += (
-            safe_float(
-                movie.get(
-                    "rating",
-                    0,
-                )
-            )
-            * 2
-        )
-
-        return score
-
-    combined.sort(
-        key=ranking,
-        reverse=True,
-    )
-
-    return jsonify(
-        combined[:SEARCH_LIMIT]
-    )
-
-
-# ============================================================
-# HOME ROUTE
-# ============================================================
 
 @app.route("/")
 def home():
@@ -2111,391 +1081,83 @@ def home():
 def recommendation():
     request_start = time.perf_counter()
 
-    # --------------------------------------------------------
-    # Request values
-    # --------------------------------------------------------
-
-    title = request.args.get(
-        "movie",
-        "",
-    ).strip()
-
-    selected_media_type = request.args.get(
-        "media_type",
-        "",
-    ).strip().lower()
-
-    selected_source = request.args.get(
-        "source",
-        "",
-    ).strip().upper()
-
-    selected_tmdb_id = request.args.get(
-        "tmdb_id",
-        "",
-    ).strip()
+    title = request.args.get("movie", "").strip()
+    selected_media_type = request.args.get("media_type", "").strip().lower()
+    selected_source = request.args.get("source", "").strip().upper()
+    selected_tmdb_id = request.args.get("tmdb_id", "").strip()
 
     if request.method == "POST":
-        title = (
-            request.form.get("movie")
-            or request.form.get("title")
-            or title
-        ).strip()
-
-        selected_media_type = (
-            request.form.get(
-                "media_type",
-                selected_media_type,
-            )
-            .strip()
-            .lower()
-        )
-
-        selected_source = (
-            request.form.get(
-                "source",
-                selected_source,
-            )
-            .strip()
-            .upper()
-        )
-
-        selected_tmdb_id = (
-            request.form.get(
-                "tmdb_id",
-                selected_tmdb_id,
-            )
-            .strip()
-        )
+        title = (request.form.get("movie") or request.form.get("title") or title).strip()
+        selected_media_type = request.form.get("media_type", selected_media_type).strip().lower()
+        selected_source = request.form.get("source", selected_source).strip().upper()
+        selected_tmdb_id = request.form.get("tmdb_id", selected_tmdb_id).strip()
 
     if not title:
         return render_template(
-            "index.html",
-            selected_movie=None,
-            recommendations=[],
-            search_results=[],
-            selected_media_type=None,
-            error=(
-                "Please enter a movie or TV series name."
-            ),
-            notice=None,
-            home_sections=HOME_SECTIONS,
+            "index.html", selected_movie=None, recommendations=[], search_results=[],
+            selected_media_type=None, error="Please enter a movie or TV series name.",
+            notice=None, home_sections=HOME_SECTIONS,
         )
 
-    # --------------------------------------------------------
-    # Explicit TMDB selection
-    # --------------------------------------------------------
-    # This prevents an identically named local movie from
-    # replacing the user's selected TMDB movie / TV result.
-    # --------------------------------------------------------
+    tmdb_results = list(cached_tmdb_search(normalize_search_text(title)))
+    selected_tmdb = None
 
-    if (
-        selected_source == "TMDB"
-        and selected_media_type in {
-            "movie",
-            "tv",
-        }
-        and selected_tmdb_id
-    ):
-        tmdb_results = cached_tmdb_search(
-            normalize_search_text(title)
-        )
-
-        selected_tmdb = None
-
+    # Respect an explicit TMDB card selection.
+    if selected_source == "TMDB" and selected_tmdb_id:
         for movie in tmdb_results:
-            movie_id = safe_string(
-                movie.get(
-                    "tmdb_id",
-                    movie.get(
-                        "id",
-                        "",
-                    ),
-                )
-            )
-
-            if movie_id == str(
-                selected_tmdb_id
-            ):
+            if safe_string(movie.get("id", movie.get("tmdb_id", ""))) == selected_tmdb_id:
                 selected_tmdb = movie
                 break
 
-        if selected_tmdb is not None:
-            selected_movie = movie_to_dict(
-                selected_tmdb
-            )
-
-            selected_movie["source"] = "TMDB"
-            selected_movie[
-                "media_type"
-            ] = selected_media_type
-
-            if selected_media_type == "tv":
-                return render_template(
-                    "index.html",
-                    selected_movie=selected_movie,
-                    recommendations=[],
-                    search_results=[],
-                    selected_media_type="tv",
-                    error=None,
-                    notice=(
-                        "This is a TV series. "
-                        "The V4 recommender currently "
-                        "supports movies only."
-                    ),
-                    home_sections=HOME_SECTIONS,
-                )
-
-            tmdb_id = selected_movie.get(
-                "tmdb_id",
-                "",
-            )
-
-            recommendations = [
-                movie_to_dict(movie)
-                for movie in smart_tmdb_recommendations(
-                    str(tmdb_id),
-                    20,
-                )
-            ]
-
-            return render_template(
-                "index.html",
-                selected_movie=selected_movie,
-                recommendations=recommendations,
-                search_results=[],
-                selected_media_type="movie",
-                error=None,
-                notice=None,
-                home_sections=HOME_SECTIONS,
-            )
-
-    # --------------------------------------------------------
-    # Local movie selection
-    # --------------------------------------------------------
-
-    selected = None
-
-    local_results = search_movies(
-        title,
-        limit=5,
-    )
-
-    normalized_title = normalize_search_text(
-        title
-    )
-
-    for movie in local_results:
-        if (
-            normalize_search_text(
-                movie.get(
-                    "title",
-                    "",
-                )
-            )
-            == normalized_title
-        ):
-            selected = movie
-            break
-
-    if selected is None and local_results:
-        selected = local_results[0]
-
-    # --------------------------------------------------------
-    # Local recommendation
-    # --------------------------------------------------------
-
-    if selected is not None:
-        selected_movie = movie_to_dict(
-            selected
-        )
-        selected_movie["source"] = "LOCAL"
-        selected_movie["media_type"] = "movie"
-
-        try:
-            recommendations = prepare_recommendations(
-                cached_v4_recommendations(
-                    selected_movie["title"]
-                )
-            )
-
-        except Exception as exc:
-            print(
-                "V4 recommendation error:",
-                repr(exc),
-            )
-            recommendations = []
-
-        total_time = (
-            time.perf_counter()
-            - request_start
-        )
-
-        print(
-            "Local movie:",
-            selected_movie["title"],
-        )
-        print(
-            "Recommendations:",
-            len(recommendations),
-        )
-        print(
-            f"TOTAL REQUEST TIME: "
-            f"{total_time:.4f}s"
-        )
-
-        return render_template(
-            "index.html",
-            selected_movie=selected_movie,
-            recommendations=recommendations,
-            search_results=[],
-            selected_media_type="movie",
-            error=None,
-            notice=None,
-            home_sections=HOME_SECTIONS,
-        )
-
-    # --------------------------------------------------------
-    # Local not found -> TMDB
-    # --------------------------------------------------------
-
-    tmdb_results = cached_tmdb_search(
-        normalize_search_text(title)
-    )
-
-    if not tmdb_results:
-        return render_template(
-            "index.html",
-            selected_movie=None,
-            recommendations=[],
-            search_results=[],
-            selected_media_type=None,
-            error=(
-                f"'{title}' was not found "
-                "in the local dataset or TMDB."
-            ),
-            notice=None,
-            home_sections=HOME_SECTIONS,
-        )
-
-    # --------------------------------------------------------
-    # Prefer exact TMDB title
-    # --------------------------------------------------------
-
-    exact_movie = None
-    exact_tv = None
-
-    for movie in tmdb_results:
-        candidate = normalize_search_text(
-            movie.get(
-                "title",
-                movie.get(
-                    "name",
-                    "",
-                ),
-            )
-        )
-
-        if candidate == normalize_search_text(
-            title
-        ):
-            if movie.get(
-                "media_type"
-            ) == "tv":
-                exact_tv = movie
-            else:
-                exact_movie = movie
-
-            break
-
-    selected_tmdb = (
-        exact_tv
-        or exact_movie
-    )
+    # Otherwise prefer exact title, then movie over TV, then first result.
+    normalized_title = normalize_search_text(title)
+    if selected_tmdb is None:
+        exact = [
+            m for m in tmdb_results
+            if normalize_search_text(m.get("title", m.get("name", ""))) == normalized_title
+        ]
+        if exact:
+            selected_tmdb = next((m for m in exact if m.get("media_type") == "movie"), exact[0])
 
     if selected_tmdb is None:
-        for movie in tmdb_results:
-            if movie.get(
-                "media_type"
-            ) == "movie":
-                selected_tmdb = movie
-                break
-
-    if selected_tmdb is None:
+        selected_tmdb = next((m for m in tmdb_results if m.get("media_type") == "movie"), None)
+    if selected_tmdb is None and tmdb_results:
         selected_tmdb = tmdb_results[0]
 
-    selected_movie = movie_to_dict(
-        selected_tmdb
-    )
+    if selected_tmdb is None:
+        return render_template(
+            "index.html", selected_movie=None, recommendations=[], search_results=[],
+            selected_media_type=None,
+            error=f"'{title}' was not found on TMDB.", notice=None,
+            home_sections=HOME_SECTIONS,
+        )
 
+    selected_movie = movie_to_dict(selected_tmdb)
     selected_movie["source"] = "TMDB"
-
-    media_type = selected_tmdb.get(
-        "media_type",
-        "movie",
-    )
-
-    selected_movie["media_type"] = (
-        "tv"
-        if media_type == "tv"
-        else "movie"
-    )
+    media_type = selected_movie.get("media_type", "movie")
 
     if media_type == "tv":
         return render_template(
-            "index.html",
-            selected_movie=selected_movie,
-            recommendations=[],
-            search_results=[],
-            selected_media_type="tv",
-            error=None,
-            notice=(
-                "This is a TV series. "
-                "The V4 recommender currently "
-                "supports movies only."
-            ),
+            "index.html", selected_movie=selected_movie, recommendations=[], search_results=[],
+            selected_media_type="tv", error=None,
+            notice="This is a TV series. TV recommendations are not enabled yet.",
             home_sections=HOME_SECTIONS,
         )
 
-    tmdb_id = selected_movie.get(
-        "tmdb_id",
-        "",
-    )
-
+    tmdb_id = safe_string(selected_movie.get("tmdb_id", ""))
     recommendations = [
-                movie_to_dict(movie)
-                for movie in smart_tmdb_recommendations(
-                    str(tmdb_id),
-                    20,
-                )
-            ]
+        movie_to_dict(movie)
+        for movie in smart_tmdb_recommendations(tmdb_id, 20)
+    ]
 
-    total_time = (
-        time.perf_counter()
-        - request_start
-    )
-
-    print(
-        "TMDB movie:",
-        selected_movie["title"],
-    )
-    print(
-        "Recommendations:",
-        len(recommendations),
-    )
-    print(
-        f"TOTAL REQUEST TIME: "
-        f"{total_time:.4f}s"
-    )
+    total_time = time.perf_counter() - request_start
+    print("TMDB movie:", selected_movie["title"])
+    print("Recommendations:", len(recommendations))
+    print(f"TOTAL REQUEST TIME: {total_time:.4f}s")
 
     return render_template(
-        "index.html",
-        selected_movie=selected_movie,
-        recommendations=recommendations,
-        search_results=[],
-        selected_media_type="movie",
-        error=None,
-        notice=None,
+        "index.html", selected_movie=selected_movie, recommendations=recommendations,
+        search_results=[], selected_media_type="movie", error=None, notice=None,
         home_sections=HOME_SECTIONS,
     )
 
@@ -2508,52 +1170,16 @@ def recommendation():
 def health():
     return jsonify({
         "status": "ok",
-        "movies_loaded": int(
-            len(df)
-        ),
-        "search_index": int(
-            len(SEARCH_RECORDS)
-        ),
+        "data_source": "TMDB",
+        "local_dataset_required": False,
         "home_sections": {
-            name: len(
-                HOME_SECTIONS[name]
-            )
-            for name in (
-                "trending",
-                "recent",
-                "mystery",
-                "bollywood",
-                "south",
-                "english",
-                "animation",
-            )
+            name: len(HOME_SECTIONS[name])
+            for name in ("trending", "recent", "drama", "horror", "bollywood", "hollywood")
         },
         "cache": {
-            "local_search": (
-                _local_search_cached
-                .cache_info()
-                ._asdict()
-            ),
-            "v4": (
-                cached_v4_recommendations
-                .cache_info()
-                ._asdict()
-            ),
-            "tmdb_search": (
-                cached_tmdb_search
-                .cache_info()
-                ._asdict()
-            ),
-            "tmdb_recommendations": (
-                cached_tmdb_recommendations
-                .cache_info()
-                ._asdict()
-            ),
-            "tmdb_discovery": (
-                discover_2026_movies
-                .cache_info()
-                ._asdict()
-            ),
+            "tmdb_search": cached_tmdb_search.cache_info()._asdict(),
+            "tmdb_recommendations": cached_tmdb_recommendations.cache_info()._asdict(),
+            "tmdb_discovery": discover_2026_movies.cache_info()._asdict(),
         },
     })
 
@@ -2567,12 +1193,8 @@ if __name__ == "__main__":
     print("=" * 70)
     print("MOVIE RECOMMENDER WEB APP")
     print("=" * 70)
-    print(
-        f"Dataset       : {len(df):,} movies"
-    )
-    print(
-        f"Search index  : {len(SEARCH_RECORDS):,} titles"
-    )
+    print("Data source   : TMDB only")
+    print("Local CSV     : not required")
     print()
     print("Open:")
     print(
