@@ -497,7 +497,42 @@ a {
 ============================================================ */
 
 .search-hints {
-    display: none !important;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.search-hints > span {
+    color: #858585;
+    font-size: 12px;
+    font-weight: 700;
+    margin-right: 2px;
+}
+
+.search-hints button {
+    appearance: none;
+    border: 1px solid rgba(155, 229, 100, 0.28);
+    background: rgba(155, 229, 100, 0.07);
+    color: #cfcfcf;
+    border-radius: 999px;
+    padding: 7px 12px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: 0.18s ease;
+}
+
+.search-hints button:hover,
+.search-hints button:focus-visible {
+    color: #111;
+    background: #9BE564;
+    border-color: #9BE564;
+    outline: none;
+    transform: translateY(-1px);
 }
 
 
@@ -1042,5 +1077,3 @@ a {
     }
 }
 
-/* Hide homepage Try buttons while keeping the existing HTML unchanged. */
-.search-hints { display: none !important; }
