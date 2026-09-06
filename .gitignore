@@ -1,0 +1,22 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Secrets
+.env
+
+# VS Code
+.vscode/
+
+# Operating system
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
+
+# Large ML model files
+models/*.pkl
