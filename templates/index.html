@@ -137,11 +137,11 @@
             <button type="button" data-example="Inception">
                 Inception
             </button>
-            <button type="button" data-example="Terminator">
-                Terminator
+            <button type="button" data-example="3 Idiots">
+                3 Idiots
             </button>
-            <button type="button" data-example="Spider Man">
-                Spider Man
+            <button type="button" data-example="Dangal">
+                Dangal
             </button>
             <button type="button" data-example="Interstellar">
                 Interstellar
@@ -232,9 +232,6 @@
                         No overview is available for this title.
                     </p>
                 {% endif %}
-
-                
-  
 
                 {% if selected_movie.cast %}
                     <p class="movie-overview" style="margin-top:12px;font-size:12px;line-height:1.6;">
@@ -348,7 +345,7 @@
 
 
     <!-- =====================================================
-         2026 HOMEPAGE SECTIONS
+         HOMEPAGE MOVIE CATEGORIES
     ====================================================== -->
 
     <div class="homepage-sections">
@@ -413,32 +410,40 @@
         {% endif %}
 
 
-        <!-- MYSTERY -->
-        {% if home_sections.mystery %}
+        <!-- DRAMA -->
+        {% if home_sections.drama %}
         <section class="home-section">
-
             <div class="section-heading">
                 <div>
-                    <span class="section-kicker">
-                        DARK • TWISTY • INTENSE
-                    </span>
-
-                    <h2>
-                        🕵️ Mystery & Thriller — 2026
-                    </h2>
+                    <span class="section-kicker">EMOTIONAL • POWERFUL • STORY-DRIVEN</span>
+                    <h2>🎭 Drama Movies</h2>
                 </div>
-
-                <span class="section-count">
-                    {{ home_sections.mystery | length }}
-                </span>
+                <span class="section-count">{{ home_sections.drama | length }}</span>
             </div>
-
             <div class="movie-grid">
-                {% for movie in home_sections.mystery %}
+                {% for movie in home_sections.drama %}
                     {% include "movie_card.html" %}
                 {% endfor %}
             </div>
+        </section>
+        {% endif %}
 
+
+        <!-- HORROR -->
+        {% if home_sections.horror %}
+        <section class="home-section">
+            <div class="section-heading">
+                <div>
+                    <span class="section-kicker">DARK • SCARY • SUPERNATURAL</span>
+                    <h2>👻 Horror Movies</h2>
+                </div>
+                <span class="section-count">{{ home_sections.horror | length }}</span>
+            </div>
+            <div class="movie-grid">
+                {% for movie in home_sections.horror %}
+                    {% include "movie_card.html" %}
+                {% endfor %}
+            </div>
         </section>
         {% endif %}
 
@@ -473,92 +478,21 @@
         {% endif %}
 
 
-        <!-- SOUTH -->
-        {% if home_sections.south %}
+        <!-- HOLLYWOOD -->
+        {% if home_sections.hollywood %}
         <section class="home-section">
-
             <div class="section-heading">
                 <div>
-                    <span class="section-kicker">
-                        TAMIL • TELUGU • MALAYALAM • KANNADA
-                    </span>
-
-                    <h2>
-                        🎬 South Indian Cinema — 2026
-                    </h2>
+                    <span class="section-kicker">ENGLISH • GLOBAL • HOLLYWOOD</span>
+                    <h2>🇺🇸 Hollywood Movies</h2>
                 </div>
-
-                <span class="section-count">
-                    {{ home_sections.south | length }}
-                </span>
+                <span class="section-count">{{ home_sections.hollywood | length }}</span>
             </div>
-
             <div class="movie-grid">
-                {% for movie in home_sections.south %}
+                {% for movie in home_sections.hollywood %}
                     {% include "movie_card.html" %}
                 {% endfor %}
             </div>
-
-        </section>
-        {% endif %}
-
-
-        <!-- ENGLISH -->
-        {% if home_sections.english %}
-        <section class="home-section">
-
-            <div class="section-heading">
-                <div>
-                    <span class="section-kicker">
-                        ENGLISH • GLOBAL
-                    </span>
-
-                    <h2>
-                        🇺🇸 English Movies — 2026
-                    </h2>
-                </div>
-
-                <span class="section-count">
-                    {{ home_sections.english | length }}
-                </span>
-            </div>
-
-            <div class="movie-grid">
-                {% for movie in home_sections.english %}
-                    {% include "movie_card.html" %}
-                {% endfor %}
-            </div>
-
-        </section>
-        {% endif %}
-
-
-        <!-- ANIMATION -->
-        {% if home_sections.animation %}
-        <section class="home-section">
-
-            <div class="section-heading">
-                <div>
-                    <span class="section-kicker">
-                        FAMILY • KIDS • CARTOONS
-                    </span>
-
-                    <h2>
-                        🎨 Animation & Cartoons — 2026
-                    </h2>
-                </div>
-
-                <span class="section-count">
-                    {{ home_sections.animation | length }}
-                </span>
-            </div>
-
-            <div class="movie-grid">
-                {% for movie in home_sections.animation %}
-                    {% include "movie_card.html" %}
-                {% endfor %}
-            </div>
-
         </section>
         {% endif %}
 
