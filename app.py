@@ -576,6 +576,70 @@ def cached_tmdb_similar_movies(tmdb_id):
         return tuple()
 
 
+@lru_cache(maxsize=TMDB_RECOMMENDATION_CACHE_SIZE)
+def cached_tmdb_recommendations_page(tmdb_id, page=2):
+    try:
+        results = get_movie_recommendations(int(tmdb_id), page=page)
+        return tuple(
+            dict(movie, source="TMDB", media_type="movie")
+            for movie in results or []
+            if isinstance(movie, dict)
+        )
+    except Exception as exc:
+        print("TMDB recommendation page error:", repr(exc))
+        return tuple()
+
+
+@lru_cache(maxsize=TMDB_RECOMMENDATION_CACHE_SIZE)
+def cached_tmdb_similar_page(tmdb_id, page=2):
+    try:
+        payload = tmdb_get(
+            f"/movie/{int(tmdb_id)}/similar",
+            params={"page": page},
+            timeout=15,
+        )
+        results = payload.get("results", []) or []
+        return tuple(
+            dict(movie, source="TMDB", media_type="movie")
+            for movie in results
+            if isinstance(movie, dict)
+        )
+    except Exception as exc:
+        print("TMDB similar page error:", repr(exc))
+        return tuple()
+
+
+@lru_cache(maxsize=TMDB_DISCOVERY_CACHE_SIZE)
+def discover_language_fallback(language_code, genre_ids="", page=1):
+    """Get extra same-language movies when TMDB rec/similar feeds are small."""
+    if not language_code:
+        return tuple()
+
+    params = {
+        "language": "en-US",
+        "page": page,
+        "include_adult": "false",
+        "include_video": "false",
+        "with_original_language": language_code,
+        "sort_by": "popularity.desc",
+        "vote_count.gte": 10,
+    }
+    if genre_ids:
+        params["with_genres"] = genre_ids
+
+    try:
+        payload = tmdb_get("/discover/movie", params=params, timeout=15)
+        results = payload.get("results", []) or []
+        return tuple(
+            dict(movie, source="TMDB", media_type="movie")
+            for movie in results
+            if isinstance(movie, dict)
+        )
+    except Exception as exc:
+        print("TMDB language fallback error:", repr(exc))
+        return tuple()
+
+
 # ============================================================
 # SMART TMDB RECOMMENDATIONS — V2
 # ============================================================
@@ -773,15 +837,13 @@ def tmdb_movie_search(query):
 
 
 @lru_cache(maxsize=TMDB_RECOMMENDATION_CACHE_SIZE)
-def smart_tmdb_recommendations(tmdb_id, limit=20):
-    """
-    Lightweight TMDB-only recommender.
+def smart_tmdb_recommendations(tmdb_id, limit=10):
+    """Strong, language-safe TMDB recommender designed for Render free tier.
 
-    It deliberately avoids searching dozens of extra titles and fetching full
-    metadata for every candidate. That was causing excessive CPU/memory usage
-    on Render's free instance. TMDB recommendations + similar movies provide
-    the candidate pool; only the strongest candidates are enriched with
-    credits for actor/director matching.
+    Candidate generation uses TMDB's recommendation + similar endpoints.
+    We first filter by the selected movie's original language, then enrich a
+    bounded number of candidates with credits/keywords.  This gives stronger
+    actor/director/story/genre matching without loading a local dataset.
     """
     details = _tmdb_details_cached(str(tmdb_id))
     if not details:
@@ -795,29 +857,75 @@ def smart_tmdb_recommendations(tmdb_id, limit=20):
     selected_words = profile.get("profile_words", set())
     selected_themes = set(profile.get("active_themes", []))
 
-    # Two TMDB endpoints only for the initial candidate pool.
+    # Start with two highly relevant TMDB candidate sources.
     recs = list(cached_tmdb_recommendations(str(tmdb_id)))
     similar = list(cached_tmdb_similar_movies(str(tmdb_id)))
 
     candidates = {}
-    for rank, movie in enumerate(recs[:20]):
-        if isinstance(movie, dict):
-            mid = safe_string(movie.get("id", ""))
-            if mid and mid != selected_id:
-                candidates[mid] = {"movie": dict(movie), "source_score": 25.0 - rank * 0.5}
 
-    for rank, movie in enumerate(similar[:20]):
-        if isinstance(movie, dict):
+    def add_candidates(items, base_score, decay):
+        for rank, movie in enumerate(items):
+            if not isinstance(movie, dict):
+                continue
             mid = safe_string(movie.get("id", ""))
-            if mid and mid != selected_id:
-                entry = candidates.setdefault(mid, {"movie": dict(movie), "source_score": 0.0})
-                entry["source_score"] += max(5.0, 15.0 - rank * 0.35)
+            if not mid or mid == selected_id:
+                continue
+
+            language = safe_string(movie.get("original_language", "")).lower()
+
+            # HARD LANGUAGE GATE before expensive detail calls.
+            if selected_language and language and language != selected_language:
+                continue
+
+            entry = candidates.setdefault(
+                mid,
+                {"movie": dict(movie), "source_score": 0.0},
+            )
+            entry["source_score"] += max(4.0, base_score - rank * decay)
+
+    add_candidates(recs[:20], 30.0, 0.55)
+    add_candidates(similar[:20], 20.0, 0.40)
+
+    # If the first pages do not contain enough same-language titles, use a
+    # second page. These calls are only made when needed.
+    if len(candidates) < max(12, limit):
+        try:
+            add_candidates(cached_tmdb_recommendations_page(str(tmdb_id), 2), 18.0, 0.35)
+        except Exception:
+            pass
+        try:
+            add_candidates(cached_tmdb_similar_page(str(tmdb_id), 2), 14.0, 0.30)
+        except Exception:
+            pass
+
+    # Final same-language safety net. This is only used when TMDB's own
+    # recommendation/similar feeds don't provide enough titles. Genres are
+    # used as a second candidate constraint, while the final ranking still
+    # uses actors/director/story/genres.
+    if len(candidates) < max(12, limit) and selected_language:
+        genre_filter = "|".join(
+            str(gid) for gid in sorted(selected_genres)
+        )
+        try:
+            add_candidates(
+                discover_language_fallback(selected_language, genre_filter, 1)[:20],
+                11.0,
+                0.20,
+            )
+        except Exception:
+            pass
 
     ranked = []
 
-    # Only enrich the first 6 candidates. This keeps one recommendation
-    # request small enough for Render's free memory/CPU limits.
-    for item in sorted(candidates.values(), key=lambda x: x["source_score"], reverse=True)[:6]:
+    # Enrich up to 14 same-language candidates. Requests are sequential to
+    # keep memory/connection pressure low on Render's free instance.
+    shortlist = sorted(
+        candidates.values(),
+        key=lambda x: x["source_score"],
+        reverse=True,
+    )[:14]
+
+    for item in shortlist:
         movie = item["movie"]
         mid = safe_string(movie.get("id", ""))
         candidate_details = _tmdb_details_cached(mid)
@@ -828,43 +936,60 @@ def smart_tmdb_recommendations(tmdb_id, limit=20):
 
         language = safe_string(movie.get("original_language", "")).lower()
 
-        # HARD language rule. If TMDB knows both languages, they must match.
-        if selected_language and language and language != selected_language:
+        # Never cross the selected movie's language.
+        if selected_language and language != selected_language:
             continue
 
-        candidate_profile = _extract_tmdb_profile(movie) if movie else {}
+        candidate_profile = _extract_tmdb_profile(movie)
         candidate_genres = candidate_profile.get("genre_ids", set())
-        candidate_words = _tmdb_text_words(" ".join([
-            safe_string(movie.get("title", "")),
-            safe_string(movie.get("overview", "")),
-            " ".join(candidate_profile.get("keyword_names", set())),
-        ]))
+        candidate_words = candidate_profile.get("profile_words", set())
 
-        actor_overlap = len(profile.get("actor_ids", set()) & candidate_profile.get("actor_ids", set()))
-        director_overlap = len(profile.get("director_ids", set()) & candidate_profile.get("director_ids", set()))
+        actor_overlap = len(
+            profile.get("actor_ids", set())
+            & candidate_profile.get("actor_ids", set())
+        )
+        director_overlap = len(
+            profile.get("director_ids", set())
+            & candidate_profile.get("director_ids", set())
+        )
         genre_overlap = len(selected_genres & candidate_genres)
         text_overlap = len(selected_words & candidate_words)
 
+        # Story similarity: Jaccard-style overlap over meaningful TMDB words.
+        meaningful_selected = selected_words - STOPWORDS
+        meaningful_candidate = candidate_words - STOPWORDS
+        union = meaningful_selected | meaningful_candidate
+        story_similarity = (
+            len(meaningful_selected & meaningful_candidate) / len(union)
+            if union else 0.0
+        )
+
         theme_score = 0.0
+        candidate_theme_set = set(candidate_profile.get("active_themes", []))
+        theme_score += len(selected_themes & candidate_theme_set) * 16.0
+
         for theme in selected_themes:
             terms = THEME_TERMS.get(theme, set())
             hits = len(terms & candidate_words)
             if hits:
-                theme_score += min(20.0, 8.0 + hits * 3.0)
+                theme_score += min(12.0, hits * 2.5)
 
         rating = safe_float(movie.get("vote_average"), 0.0)
         popularity = min(safe_float(movie.get("popularity"), 0.0), 100.0)
 
+        # Strong weighting: same language is mandatory; shared cast/director,
+        # genre and story are the main ranking signals.
         score = (
             item["source_score"]
-            + (18.0 if selected_language and language == selected_language else 0.0)
-            + min(genre_overlap, 3) * 10.0
-            + min(actor_overlap, 3) * 12.0
-            + min(director_overlap, 1) * 20.0
-            + min(text_overlap, 8) * 1.5
+            + 22.0
+            + min(actor_overlap, 4) * 14.0
+            + min(director_overlap, 1) * 28.0
+            + min(genre_overlap, 4) * 9.0
+            + min(text_overlap, 12) * 1.8
+            + story_similarity * 30.0
             + theme_score
-            + (rating / 10.0) * 4.0
-            + (popularity / 100.0) * 2.0
+            + (rating / 10.0) * 3.0
+            + (popularity / 100.0) * 1.5
         )
 
         title = safe_string(movie.get("title", ""))
@@ -873,14 +998,18 @@ def smart_tmdb_recommendations(tmdb_id, limit=20):
 
         movie["source"] = "TMDB"
         movie["media_type"] = "movie"
-        movie["match_score"] = round(min(99.0, max(1.0, score)), 1)
+        movie["match_score"] = round(min(99.9, max(1.0, score)), 1)
         ranked.append((score, movie))
 
     ranked.sort(key=lambda x: x[0], reverse=True)
     result = [movie for _, movie in ranked[:limit]]
 
-    # If the strict filter leaves too few results, do NOT mix languages.
-    print("TMDB recommender:", profile.get("title"), "->", len(result), "results")
+    print(
+        "TMDB recommender:",
+        profile.get("title"),
+        "language=", selected_language,
+        "->", len(result), "results",
+    )
     return tuple(result)
 
 
@@ -1156,7 +1285,7 @@ def recommendation():
     tmdb_id = safe_string(selected_movie.get("tmdb_id", ""))
     recommendations = [
         movie_to_dict(movie)
-        for movie in smart_tmdb_recommendations(tmdb_id, 20)
+        for movie in smart_tmdb_recommendations(tmdb_id, 10)
     ]
 
     total_time = time.perf_counter() - request_start
