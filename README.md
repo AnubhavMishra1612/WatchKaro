@@ -46,3 +46,17 @@ WatchKaro/
 │   └── script.js
 ├── .env.example
 └── .gitignore
+
+Setup
+Clone the repository.
+Create a Python virtual environment.
+Install the required dependencies.
+Add TMDB API credentials to .env.
+Run the Flask application.
+Note
+
+The trained recommendation model and large dataset are not included in this repository because of their file size.
+
+Author
+
+Anubhav Mishra
