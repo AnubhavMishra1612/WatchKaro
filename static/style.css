@@ -1077,3 +1077,19 @@ a {
     }
 }
 
+
+
+/* ============================================================
+   UNIQUE VISITOR COUNTER
+   ============================================================ */
+
+.visitor-counter {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+.visitor-counter strong {
+    font-variant-numeric: tabular-nums;
+}
