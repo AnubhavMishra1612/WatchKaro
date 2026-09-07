@@ -23,6 +23,8 @@
 # - Request caching
 # - TMDB caching
 # - No local dataset dependency
+# - Anonymous unique visitor counter (Supabase)
+# - Unique visitor count endpoint for the footer
 # - Health endpoint
 #
 # IMPORTANT
@@ -39,6 +41,7 @@
 import os
 import re
 import time
+import secrets
 from bisect import bisect_left
 from datetime import date
 from difflib import SequenceMatcher
@@ -86,6 +89,15 @@ TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "").strip()
 TMDB_ACCESS_TOKEN = os.getenv("TMDB_ACCESS_TOKEN", "").strip()
 
+# Supabase is used only for the anonymous unique-visitor counter.
+# These values are kept in Render Environment Variables and are never
+# exposed to the browser.
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
+SUPABASE_VISITORS_URL = f"{SUPABASE_URL}/rest/v1/visitors" if SUPABASE_URL else ""
+VISITOR_COOKIE_NAME = "watchkaro_visitor_id"
+VISITOR_COOKIE_MAX_AGE = 60 * 60 * 24 * 730  # about 2 years
+
 if TMDB_ACCESS_TOKEN:
     TMDB_HEADERS = {
         "Authorization": f"Bearer {TMDB_ACCESS_TOKEN}",
@@ -95,6 +107,128 @@ else:
     TMDB_HEADERS = {
         "accept": "application/json",
     }
+
+
+# ============================================================
+# ANONYMOUS UNIQUE-VISITOR TRACKING — SUPABASE
+# ============================================================
+
+def _supabase_headers(prefer=""):
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    }
+    if prefer:
+        headers["Prefer"] = prefer
+    return headers
+
+
+def record_unique_visitor(visitor_id):
+    """Store a new anonymous browser visitor in Supabase.
+
+    The browser ID is random and contains no personal/device information.
+    The visitor cookie is only created after Supabase accepts the row.
+    """
+    if not SUPABASE_VISITORS_URL or not SUPABASE_KEY or not visitor_id:
+        return False
+
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    payload = {
+        "visitor_id": visitor_id,
+        "first_seen": now,
+        "last_seen": now,
+    }
+
+    try:
+        response = requests.post(
+            SUPABASE_VISITORS_URL,
+            headers=_supabase_headers("return=minimal"),
+            json=payload,
+            timeout=5,
+        )
+
+        # 201 = newly created. 409 means this ID already exists; either
+        # response means the browser has been successfully registered.
+        return response.status_code in (201, 409)
+    except requests.RequestException as exc:
+        print(f"SUPABASE VISITOR ERROR: {exc}")
+        return False
+
+
+def get_unique_visitor_count():
+    """Return the exact number of rows in the visitors table."""
+    if not SUPABASE_VISITORS_URL or not SUPABASE_KEY:
+        return None
+
+    try:
+        response = requests.get(
+            SUPABASE_VISITORS_URL,
+            params={"select": "id", "limit": "1"},
+            headers=_supabase_headers("count=exact"),
+            timeout=5,
+        )
+        response.raise_for_status()
+
+        content_range = response.headers.get("Content-Range", "")
+        if "/" in content_range:
+            total = content_range.rsplit("/", 1)[-1]
+            if total.isdigit():
+                return int(total)
+
+        # Fallback for environments that do not return Content-Range.
+        data = response.json()
+        return len(data) if isinstance(data, list) else None
+    except (requests.RequestException, ValueError) as exc:
+        print(f"SUPABASE COUNT ERROR: {exc}")
+        return None
+
+
+@app.before_request
+def track_unique_visitor():
+    """Register a browser once, without touching static files.
+
+    This intentionally counts unique browsers/visitors, not simultaneous
+    active devices. A random first-party cookie is used as the anonymous
+    visitor identifier; no IP address, IMEI, name, email, or GPS data is
+    stored.
+    """
+    if request.path.startswith("/static/"):
+        return
+
+    visitor_id = request.cookies.get(VISITOR_COOKIE_NAME, "").strip()
+    if visitor_id:
+        return
+
+    # Generate an anonymous, random browser identifier.
+    candidate = secrets.token_urlsafe(32)
+    if record_unique_visitor(candidate):
+        request._watchkaro_new_visitor_id = candidate
+
+
+@app.after_request
+def set_visitor_cookie(response):
+    visitor_id = getattr(request, "_watchkaro_new_visitor_id", "")
+    if visitor_id:
+        response.set_cookie(
+            VISITOR_COOKIE_NAME,
+            visitor_id,
+            max_age=VISITOR_COOKIE_MAX_AGE,
+            httponly=True,
+            secure=True,
+            samesite="Lax",
+            path="/",
+        )
+    return response
+
+
+@app.route("/api/visitor-count")
+def visitor_count():
+    """Return the total number of unique visitors recorded since launch."""
+    count = get_unique_visitor_count()
+    if count is None:
+        return jsonify({"status": "unavailable", "unique_visitors": 0}), 503
+    return jsonify({"status": "ok", "unique_visitors": count})
 
 
 # ============================================================
