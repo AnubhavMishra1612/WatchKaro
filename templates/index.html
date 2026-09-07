@@ -137,14 +137,11 @@
             <button type="button" data-example="Inception">
                 Inception
             </button>
-            <button type="button" data-example="Terminator">
-                Terminator
+            <button type="button" data-example="3 Idiots">
+                3 Idiots
             </button>
-            <button type="button" data-example="Spider Man">
-                Spider Man 
-            </button>
-            <button type="button" data-example="Doraemon">
-                Doraemon
+            <button type="button" data-example="Dangal">
+                Dangal
             </button>
             <button type="button" data-example="Interstellar">
                 Interstellar
@@ -511,9 +508,11 @@
     </div>
 
     <div>
-        <span>Local dataset: 78k+ movies</span>
-        <span>•</span>
         <span>TMDB live discovery</span>
+        <span>•</span>
+        <span class="visitor-counter" aria-live="polite">
+            👥 <strong id="visitor-count">—</strong> unique visitors since launch
+        </span>
     </div>
 </footer>
 
@@ -521,6 +520,31 @@
 <script
     src="{{ url_for('static', filename='script.js') }}"
 ></script>
+
+<script>
+    (function () {
+        const counter = document.getElementById("visitor-count");
+        if (!counter) return;
+
+        fetch("{{ url_for('visitor_count') }}", {
+            method: "GET",
+            cache: "no-store",
+            credentials: "same-origin"
+        })
+        .then(function (response) {
+            if (!response.ok) throw new Error("Visitor count unavailable");
+            return response.json();
+        })
+        .then(function (data) {
+            if (typeof data.unique_visitors === "number") {
+                counter.textContent = data.unique_visitors.toLocaleString();
+            }
+        })
+        .catch(function () {
+            counter.textContent = "—";
+        });
+    })();
+</script>
 
 </body>
 </html>
