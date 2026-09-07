@@ -114,9 +114,11 @@ else:
 # ============================================================
 
 def _supabase_headers(prefer=""):
+    # Supabase's current sb_secret_* keys are API keys, not JWTs.
+    # They must be sent in the apikey header. Sending an sb_secret_* key
+    # as "Authorization: Bearer ..." can cause an Invalid JWT/401 response.
     headers = {
         "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
         "Content-Type": "application/json",
     }
     if prefer:
@@ -150,7 +152,14 @@ def record_unique_visitor(visitor_id):
 
         # 201 = newly created. 409 means this ID already exists; either
         # response means the browser has been successfully registered.
-        return response.status_code in (201, 409)
+        if response.status_code in (201, 409):
+            return True
+
+        print(
+            "SUPABASE VISITOR ERROR: "
+            f"HTTP {response.status_code} - {response.text[:300]}"
+        )
+        return False
     except requests.RequestException as exc:
         print(f"SUPABASE VISITOR ERROR: {exc}")
         return False
@@ -168,7 +177,12 @@ def get_unique_visitor_count():
             headers=_supabase_headers("count=exact"),
             timeout=5,
         )
-        response.raise_for_status()
+        if not response.ok:
+            print(
+                "SUPABASE COUNT ERROR: "
+                f"HTTP {response.status_code} - {response.text[:300]}"
+            )
+            return None
 
         content_range = response.headers.get("Content-Range", "")
         if "/" in content_range:
