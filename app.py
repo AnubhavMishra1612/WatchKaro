@@ -54,6 +54,7 @@ from flask import Flask, jsonify, render_template, request
 
 import tmdb_api
 import analytics_tracker
+import quiz_engine
 
 
 # ============================================================
@@ -1424,22 +1425,23 @@ def quiz():
 
 
 @app.route("/api/quiz", methods=["POST"])
+@app.route("/api/quiz/recommend", methods=["POST"])
 def api_quiz():
     data = request.get_json(silent=True) or request.form.to_dict() or {}
-    recommendations = tmdb_api.get_quiz_recommendations(data)
+    best_movie = quiz_engine.get_single_quiz_recommendation(data)
 
     genre = data.get("genre", "")
     language = data.get("language", "")
     industry = data.get("industry", "")
     analytics_tracker.record_quiz_completion(genre, language, industry)
 
-    if recommendations:
-        analytics_tracker.record_recommendation("Quiz", [m.get("title", "") for m in recommendations])
+    if best_movie:
+        analytics_tracker.record_recommendation("Quiz", [best_movie.get("title", "")])
 
     return jsonify({
         "status": "ok",
-        "count": len(recommendations),
-        "recommendations": recommendations,
+        "recommendation": best_movie,
+        "recommendations": [best_movie] if best_movie else [],
     })
 
 
