@@ -242,14 +242,14 @@
 
                 {% if selected_movie.cast %}
                     <p class="movie-overview" style="margin-top:12px;font-size:12px;line-height:1.6;">
-                        <strong style="color:#ffc107;">Cast:</strong>
+                        <strong class="detail-label">Cast:</strong>
                         {{ selected_movie.cast }}
                     </p>
                 {% endif %}
 
                 {% if selected_movie.director %}
                     <p class="movie-overview" style="margin-top:4px;font-size:12px;line-height:1.6;">
-                        <strong style="color:#ffc107;">Director:</strong>
+                        <strong class="detail-label">Director:</strong>
                         {{ selected_movie.director }}
                     </p>
                 {% endif %}
@@ -552,6 +552,26 @@
         });
     })();
 </script>
+
+<!-- FLOATING MOBILE BOTTOM NAVIGATION -->
+<nav class="mobile-bottom-nav" aria-label="Mobile Navigation">
+    <a href="{{ url_for('home') }}" class="mobile-nav-item active">
+        <svg class="mobile-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <span>Home</span>
+    </a>
+    <a href="{{ url_for('explore') }}" class="mobile-nav-item">
+        <svg class="mobile-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+        <span>Explore</span>
+    </a>
+    <a href="{{ url_for('quiz') }}" class="mobile-nav-item">
+        <svg class="mobile-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span>Find My Movie</span>
+    </a>
+    <a href="{{ url_for('analytics') }}" class="mobile-nav-item">
+        <svg class="mobile-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+        <span>Analytics</span>
+    </a>
+</nav>
 
 </body>
 </html>
