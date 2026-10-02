@@ -140,11 +140,17 @@
                     </select>
                 </div>
 
-                <!-- Reset Button -->
-                <div class="filter-group">
-                    <button type="button" id="resetFilters" class="reset-filters-btn">
-                        ✕ Reset Filters
-                    </button>
+                <!-- Action Buttons -->
+                <div class="filter-group filter-actions-group">
+                    <label class="filter-label filter-action-spacer" aria-hidden="true">&nbsp;</label>
+                    <div class="filter-buttons-wrap">
+                        <button type="button" id="applyFilters" class="apply-filters-btn">
+                            Apply Filter
+                        </button>
+                        <button type="button" id="resetFilters" class="reset-filters-btn">
+                            ✕ Reset
+                        </button>
+                    </div>
                 </div>
             </div>
         </section>
@@ -199,6 +205,7 @@
     const genreSelect = document.getElementById("filterGenre");
     const indSelect = document.getElementById("filterIndustry");
     const resetBtn = document.getElementById("resetFilters");
+    const applyBtn = document.getElementById("applyFilters");
     const grid = document.getElementById("exploreGrid");
     const countLabel = document.getElementById("resultsCount");
     const presetLabel = document.getElementById("activePresetLabel");
@@ -337,6 +344,11 @@
     langSelect.addEventListener("change", fetchFilteredMovies);
     genreSelect.addEventListener("change", fetchFilteredMovies);
     indSelect.addEventListener("change", fetchFilteredMovies);
+
+    // Apply button
+    if (applyBtn) {
+        applyBtn.addEventListener("click", fetchFilteredMovies);
+    }
 
     // Reset button
     resetBtn.addEventListener("click", () => {
