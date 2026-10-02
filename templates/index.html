@@ -35,6 +35,13 @@
             </span>
         </a>
 
+        <nav class="site-nav" aria-label="Main Navigation">
+            <a href="{{ url_for('home') }}" class="nav-item active">Home</a>
+            <a href="{{ url_for('explore') }}" class="nav-item">Explore</a>
+            <a href="{{ url_for('quiz') }}" class="nav-item">Find My Movie</a>
+            <a href="{{ url_for('analytics') }}" class="nav-item">Analytics</a>
+        </nav>
+
         <div class="header-status">
             <span class="status-dot"></span>
             Live 2026 Discovery

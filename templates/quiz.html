@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Find your next favorite movie with WatchKaro's rule-based preference quiz. Tailored recommendations based on genre, mood, era, runtime, and industry.">
+    <title>WatchKaro — Find My Movie (Preference Quiz)</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="site-header">
+    <div class="header-inner">
+        <a class="brand" href="{{ url_for('home') }}" aria-label="WatchKaro Home">
+            <span class="brand-mark">M</span>
+            <span>
+                <strong>WatchKaro</strong>
+                <small>AI Movie Recommender</small>
+            </span>
+        </a>
+
+        <nav class="site-nav" aria-label="Main Navigation">
+            <a href="{{ url_for('home') }}" class="nav-item">Home</a>
+            <a href="{{ url_for('explore') }}" class="nav-item">Explore</a>
+            <a href="{{ url_for('quiz') }}" class="nav-item active">Find My Movie</a>
+            <a href="{{ url_for('analytics') }}" class="nav-item">Analytics</a>
+        </nav>
+
+        <div class="header-status">
+            <span class="status-dot"></span>
+            Rule-Based Engine
+        </div>
+    </div>
+</header>
+
+<main class="page-shell">
+    <div class="quiz-wrapper">
+
+        <div class="hero-copy" style="margin-bottom: 32px;">
+            <span class="hero-kicker">PERSONALIZED CURATION • RULE-BASED MATCHING</span>
+            <h1 style="font-size: clamp(32px, 4.5vw, 52px);">Find My Movie</h1>
+            <p>Answer 7 quick questions and our deterministic algorithm will match you with 5–10 perfect recommendations.</p>
+        </div>
+
+        <!-- Quiz Form -->
+        <form id="quizForm">
+
+            <!-- Question 1: Genre -->
+            <div class="quiz-card">
+                <div class="quiz-step-header">
+                    <span class="step-num">1</span>
+                    <h2 class="step-title">What genre are you in the mood for?</h2>
+                </div>
+                <p class="quiz-step-desc">Pick your primary story genre or style.</p>
+                <div class="quiz-options" data-field="genre">
+                    <button type="button" class="quiz-option selected" data-value="Action & Adventure">
+                        <strong>💥 Action & Adventure</strong>
+                        <small>High stakes, chases & excitement</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="Sci-Fi & Fantasy">
+                        <strong>🚀 Sci-Fi & Fantasy</strong>
+                        <small>Space, futuristic tech & worldbuilding</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="Comedy">
+                        <strong>😂 Comedy & Feel-Good</strong>
+                        <small>Laughter, warmth & easy vibes</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="Drama">
+                        <strong>🎭 Drama & Emotion</strong>
+                        <small>Deep characters & intense storytelling</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="Thriller & Mystery">
+                        <strong>🔍 Thriller & Mystery</strong>
+                        <small>Puzzles, plot twists & suspense</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="Horror">
+                        <strong>👻 Horror & Supernatural</strong>
+                        <small>Chills, monsters & dark atmosphere</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="Romance">
+                        <strong>❤️ Romance & Love</strong>
+                        <small>Heartfelt relationships & chemistry</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="Animation & Family">
+                        <strong>🎨 Animation & Family</strong>
+                        <small>Creative visuals & wholesome fun</small>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Question 2: Language -->
+            <div class="quiz-card">
+                <div class="quiz-step-header">
+                    <span class="step-num">2</span>
+                    <h2 class="step-title">What language do you prefer?</h2>
+                </div>
+                <p class="quiz-step-desc">Select your preferred audio or original language.</p>
+                <div class="quiz-options" data-field="language">
+                    <button type="button" class="quiz-option selected" data-value="Any">
+                        <strong>🌐 Any Language</strong>
+                        <small>I don't mind subtitles</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="Hindi">
+                        <strong>🇮🇳 Hindi</strong>
+                        <small>Bollywood & Indian cinema</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="English">
+                        <strong>🇺🇸 English</strong>
+                        <small>Hollywood & international</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="South Indian">
+                        <strong>🌴 South Indian</strong>
+                        <small>Tamil, Telugu, Malayalam, Kannada</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="Korean">
+                        <strong>🇰🇷 Korean</strong>
+                        <small>K-Cinema & thrillers</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="Japanese">
+                        <strong>🇯🇵 Japanese</strong>
+                        <small>Anime & cinematic gems</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="Spanish">
+                        <strong>🇪🇸 Spanish</strong>
+                        <small>Ibero-American storytelling</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="French">
+                        <strong>🇫🇷 French</strong>
+                        <small>European cinema & art</small>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Question 3: Mood / Experience -->
+            <div class="quiz-card">
+                <div class="quiz-step-header">
+                    <span class="step-num">3</span>
+                    <h2 class="step-title">What kind of mood or experience are you seeking?</h2>
+                </div>
+                <p class="quiz-step-desc">The emotional feeling you want after watching.</p>
+                <div class="quiz-options" data-field="mood">
+                    <button type="button" class="quiz-option selected" data-value="feel_good">
+                        <strong>☀️ Uplifting & Feel-Good</strong>
+                        <small>Leave me smiling & energized</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="thrill">
+                        <strong>⚡ Edge-of-Your-Seat Thrill</strong>
+                        <small>Adrenaline rush from start to finish</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="emotional">
+                        <strong>💧 Deep & Emotional</strong>
+                        <small>Make me truly feel something</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="mind_bending">
+                        <strong>🧠 Mind-Bending & Clever</strong>
+                        <small>Make me think and theorize</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="dark">
+                        <strong>🌑 Dark, Gritty & Intense</strong>
+                        <small>Raw, suspenseful & uncompromising</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="chill">
+                        <strong>🛋️ Relaxed & Cozy</strong>
+                        <small>Zero stress casual watch</small>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Question 4: Release Era / Recentness -->
+            <div class="quiz-card">
+                <div class="quiz-step-header">
+                    <span class="step-num">4</span>
+                    <h2 class="step-title">Preferred release era / recentness?</h2>
+                </div>
+                <p class="quiz-step-desc">How fresh or classic should the movie be?</p>
+                <div class="quiz-options" data-field="year_era">
+                    <button type="button" class="quiz-option" data-value="2025_2026">
+                        <strong>✨ Latest Releases (2025–2026)</strong>
+                        <small>Brand new cinema & releases</small>
+                    </button>
+                    <button type="button" class="quiz-option selected" data-value="2020_2024">
+                        <strong>🔥 Modern Era (2020–2024)</strong>
+                        <small>Recent blockbusters & viral hits</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="2010s">
+                        <strong>📼 2010s Hits (2010–2019)</strong>
+                        <small>Modern classics of the past decade</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="classics">
+                        <strong>🏛️ Classics (Pre-2000)</strong>
+                        <small>Timeless golden era films</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="any">
+                        <strong>♾️ Any Year</strong>
+                        <small>A great story is timeless</small>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Question 5: Popularity Preference -->
+            <div class="quiz-card">
+                <div class="quiz-step-header">
+                    <span class="step-num">5</span>
+                    <h2 class="step-title">How popular should the movie be?</h2>
+                </div>
+                <p class="quiz-step-desc">Mainstream blockbusters vs. under-the-radar masterpieces.</p>
+                <div class="quiz-options" data-field="popularity_pref">
+                    <button type="button" class="quiz-option" data-value="blockbuster">
+                        <strong>🎟️ Blockbuster Megahits</strong>
+                        <small>Huge budget, crowd-pleasing spectacles</small>
+                    </button>
+                    <button type="button" class="quiz-option selected" data-value="acclaimed">
+                        <strong>🏆 Highly Acclaimed</strong>
+                        <small>Strong ratings, beloved by audiences</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="hidden_gem">
+                        <strong>💎 Hidden Gems</strong>
+                        <small>Exceptional quality, less mainstream hype</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="any">
+                        <strong>⚖️ Any Popularity</strong>
+                        <small>No preference on fame</small>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Question 6: Movie Length -->
+            <div class="quiz-card">
+                <div class="quiz-step-header">
+                    <span class="step-num">6</span>
+                    <h2 class="step-title">How much time do you have?</h2>
+                </div>
+                <p class="quiz-step-desc">Target runtime for your viewing session.</p>
+                <div class="quiz-options" data-field="length_pref">
+                    <button type="button" class="quiz-option" data-value="short">
+                        <strong>⚡ Quick Watch (&lt; 100 mins)</strong>
+                        <small>Brisk, tight & punchy</small>
+                    </button>
+                    <button type="button" class="quiz-option selected" data-value="medium">
+                        <strong>⏱️ Standard Feature (100–140 mins)</strong>
+                        <small>Standard feature-length story</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="epic">
+                        <strong>🍿 Epic Experience (140+ mins)</strong>
+                        <small>Grand scale & deep immersion</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="any">
+                        <strong>⏳ Any Length</strong>
+                        <small>Doesn't matter as long as it's good</small>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Question 7: Industry / Cinema Region -->
+            <div class="quiz-card">
+                <div class="quiz-step-header">
+                    <span class="step-num">7</span>
+                    <h2 class="step-title">Preferred cinema industry or region?</h2>
+                </div>
+                <p class="quiz-step-desc">Where in the world should the storytelling hail from?</p>
+                <div class="quiz-options" data-field="industry">
+                    <button type="button" class="quiz-option selected" data-value="any">
+                        <strong>🌍 Global / Anywhere</strong>
+                        <small>Best stories from around the globe</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="hollywood">
+                        <strong>🎬 Hollywood / US</strong>
+                        <small>Western cinema & studios</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="bollywood">
+                        <strong>🇮🇳 Bollywood (Hindi)</strong>
+                        <small>Desi narrative, drama & spectacle</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="south_indian">
+                        <strong>🌴 South Indian Cinema</strong>
+                        <small>Tollywood, Kollywood, Mollywood & Sandalwood</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="asian">
+                        <strong>⛩️ East Asian Cinema</strong>
+                        <small>Korean, Japanese & Hong Kong cinema</small>
+                    </button>
+                    <button type="button" class="quiz-option" data-value="european">
+                        <strong>🏰 European Cinema</strong>
+                        <small>British, French, Spanish & German films</small>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Submit Button Bar -->
+            <div class="quiz-submit-bar">
+                <button type="submit" class="quiz-btn-submit" id="quizSubmitBtn">
+                    <span>Generate My Recommendations</span>
+                    <span aria-hidden="true">→</span>
+                </button>
+            </div>
+
+            <p class="quiz-rule-notice">
+                ⚖️ <strong>Rule-based algorithm:</strong> Matches are computed strictly from your actual answers using genre weights, language compatibility, era alignment, and TMDB quality metrics. No generative AI or fake scores.
+            </p>
+
+        </form>
+
+        <!-- Quiz Results Section -->
+        <section id="quizResultsSection" style="display: none; margin-top: 48px;">
+            <div class="quiz-result-banner">
+                <div>
+                    <span class="hero-kicker" style="color: var(--accent);">RECOMMENDATIONS READY</span>
+                    <h2 style="margin: 4px 0 0; font-size: 22px; color: #fff;">🎯 Your Top Matched Movies</h2>
+                    <p style="margin: 4px 0 0; font-size: 13px; color: var(--text-soft);">
+                        Calculated transparently from your actual criteria. Ranked by real match score (capped at 100%).
+                    </p>
+                </div>
+                <button type="button" id="retakeQuizBtn" class="reset-filters-btn" style="border-color: rgba(255,193,7,0.3); color: var(--accent);">
+                    ↺ Adjust Answers
+                </button>
+            </div>
+
+            <div class="movie-grid" id="quizResultsGrid">
+                <!-- Recommendations will be populated here -->
+            </div>
+        </section>
+
+    </div>
+</main>
+
+<footer class="site-footer">
+    <div>
+        <strong>WatchKaro</strong>
+        <span>Rule-based Movie Preference Matching</span>
+    </div>
+    <div>
+        <span>TMDB Live API</span>
+        <span>•</span>
+        <span class="visitor-counter" aria-live="polite">
+            👥 <strong id="visitor-count">—</strong> unique visitors since launch
+        </span>
+    </div>
+</footer>
+
+<script>
+(() => {
+    "use strict";
+
+    const quizForm = document.getElementById("quizForm");
+    const submitBtn = document.getElementById("quizSubmitBtn");
+    const resultsSection = document.getElementById("quizResultsSection");
+    const resultsGrid = document.getElementById("quizResultsGrid");
+    const retakeBtn = document.getElementById("retakeQuizBtn");
+
+    // Option selection behavior
+    document.querySelectorAll(".quiz-options").forEach(group => {
+        const buttons = group.querySelectorAll(".quiz-option");
+        buttons.forEach(btn => {
+            btn.addEventListener("click", () => {
+                buttons.forEach(b => b.classList.remove("selected"));
+                btn.classList.add("selected");
+            });
+        });
+    });
+
+    function getSelectedValue(field) {
+        const group = document.querySelector(`.quiz-options[data-field="${field}"]`);
+        if (!group) return "";
+        const selected = group.querySelector(".quiz-option.selected");
+        return selected ? selected.dataset.value : "";
+    }
+
+    function escapeHtml(val) {
+        return String(val ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    function renderMovieCard(movie) {
+        const title = escapeHtml(movie.title || "Unknown");
+        const tmdbId = escapeHtml(movie.tmdb_id || "");
+        const mediaType = escapeHtml(movie.media_type || "movie");
+        const poster = movie.poster ? `<img src="${escapeHtml(movie.poster)}" alt="${title}" loading="lazy">` : `<div class="no-poster">No Poster</div>`;
+        const year = escapeHtml(movie.year || "N/A");
+        const lang = escapeHtml(movie.language || "Unknown");
+        const rating = escapeHtml(movie.rating || "0.0");
+        const genres = movie.genres ? `<div class="genre-line" title="${escapeHtml(movie.genres)}">${escapeHtml(movie.genres)}</div>` : "";
+        const score = Math.min(100, Math.round(Number(movie.match_score) || 0));
+
+        const reasons = Array.isArray(movie.match_reasons) && movie.match_reasons.length
+            ? `<div style="font-size:10px; color:#A3E635; margin-top:4px;">✓ ${movie.match_reasons.slice(0, 2).join(" • ")}</div>`
+            : "";
+
+        return `
+            <a class="movie-card-link" href="/recommend?movie=${encodeURIComponent(movie.title)}&source=TMDB&media_type=${mediaType}&tmdb_id=${tmdbId}">
+                <article class="movie-card">
+                    <div class="poster-wrap">
+                        ${poster}
+                        <span class="source-pill">TMDB</span>
+                    </div>
+                    <div class="card-content">
+                        <h3 title="${title}">${title}</h3>
+                        <div class="card-meta">
+                            <span>📅 ${year}</span>
+                            <span>🌐 ${lang}</span>
+                            <span>⭐ ${rating}</span>
+                        </div>
+                        ${genres}
+                        <div class="match-score">Match ${score}%</div>
+                        ${reasons}
+                    </div>
+                </article>
+            </a>
+        `;
+    }
+
+    quizForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+
+        const answers = {
+            genre: getSelectedValue("genre"),
+            language: getSelectedValue("language"),
+            mood: getSelectedValue("mood"),
+            year_era: getSelectedValue("year_era"),
+            popularity_pref: getSelectedValue("popularity_pref"),
+            length_pref: getSelectedValue("length_pref"),
+            industry: getSelectedValue("industry")
+        };
+
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = `<span>Matching Criteria...</span>`;
+
+        fetch("/api/quiz", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(answers)
+        })
+        .then(res => res.json())
+        .then(data => {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = `<span>Generate My Recommendations</span> <span aria-hidden="true">→</span>`;
+
+            const movies = data.recommendations || [];
+            if (!movies.length) {
+                resultsGrid.innerHTML = `
+                    <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--muted);">
+                        No candidates fully matched these specific preferences. Please try broadening your era or popularity choice.
+                    </div>
+                `;
+            } else {
+                resultsGrid.innerHTML = movies.map(renderMovieCard).join("");
+            }
+
+            resultsSection.style.display = "block";
+            resultsSection.scrollIntoView({ behavior: "smooth" });
+        })
+        .catch(err => {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = `<span>Generate My Recommendations</span> <span aria-hidden="true">→</span>`;
+            console.error("Quiz submission error:", err);
+            alert("Something went wrong while generating recommendations. Please try again.");
+        });
+    });
+
+    retakeBtn.addEventListener("click", () => {
+        resultsSection.style.display = "none";
+        quizForm.scrollIntoView({ behavior: "smooth" });
+    });
+
+    // Visitor counter
+    const counter = document.getElementById("visitor-count");
+    if (counter) {
+        fetch("/api/visitor-count")
+            .then(res => res.json())
+            .then(data => {
+                if (typeof data.unique_visitors === "number") {
+                    counter.textContent = data.unique_visitors.toLocaleString();
+                }
+            })
+            .catch(() => { counter.textContent = "—"; });
+    }
+})();
+</script>
+
+</body>
+</html>

@@ -52,6 +52,9 @@ import requests
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
 
+import tmdb_api
+import analytics_tracker
+
 
 # ============================================================
 # ENVIRONMENT
@@ -1073,10 +1076,24 @@ def smart_tmdb_recommendations(tmdb_id, limit=10):
         reverse=True,
     )[:14]
 
+    details_cache = {}
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        future_to_mid = {
+            executor.submit(_tmdb_details_cached, safe_string(item["movie"].get("id", ""))): safe_string(item["movie"].get("id", ""))
+            for item in shortlist
+            if safe_string(item["movie"].get("id", ""))
+        }
+        for future in as_completed(future_to_mid):
+            mid = future_to_mid[future]
+            try:
+                details_cache[mid] = future.result()
+            except Exception:
+                details_cache[mid] = {}
+
     for item in shortlist:
         movie = item["movie"]
         mid = safe_string(movie.get("id", ""))
-        candidate_details = _tmdb_details_cached(mid)
+        candidate_details = details_cache.get(mid)
         if candidate_details:
             merged = dict(movie)
             merged.update(candidate_details)
@@ -1326,6 +1343,7 @@ def search():
     if not query:
         return jsonify([])
 
+    analytics_tracker.record_search(query)
     results = list(cached_tmdb_search(normalize_search_text(query)))
     return jsonify([movie_to_dict(movie) for movie in results[:SEARCH_LIMIT]])
 
@@ -1341,7 +1359,113 @@ def home():
         error=None,
         notice=None,
         home_sections=get_home_sections(),
+        active_page="home",
     )
+
+
+# ============================================================
+# EXPLORE / CATEGORY FILTER ROUTES
+# ============================================================
+
+@app.route("/explore")
+def explore():
+    preset = request.args.get("preset", "popular").strip()
+    year = request.args.get("year", "all").strip()
+    language = request.args.get("language", "all").strip()
+    genre = request.args.get("genre", "all").strip()
+    industry = request.args.get("industry", "all").strip()
+    page = request.args.get("page", 1, type=int)
+
+    initial_movies = tmdb_api.discover_movies(
+        preset=preset,
+        year=year,
+        language=language,
+        genre=genre,
+        industry=industry,
+        page=page,
+    )
+
+    return render_template(
+        "explore.html",
+        initial_movies=initial_movies,
+        active_preset=preset,
+        active_page="explore",
+    )
+
+
+@app.route("/api/explore")
+def api_explore():
+    preset = request.args.get("preset", "popular").strip()
+    year = request.args.get("year", "all").strip()
+    language = request.args.get("language", "all").strip()
+    genre = request.args.get("genre", "all").strip()
+    industry = request.args.get("industry", "all").strip()
+    page = request.args.get("page", 1, type=int)
+
+    movies = tmdb_api.discover_movies(
+        preset=preset,
+        year=year,
+        language=language,
+        genre=genre,
+        industry=industry,
+        page=page,
+    )
+    return jsonify(movies)
+
+
+# ============================================================
+# FIND MY MOVIE (QUIZ) ROUTES
+# ============================================================
+
+@app.route("/quiz")
+@app.route("/find-my-movie")
+def quiz():
+    return render_template("quiz.html", active_page="quiz")
+
+
+@app.route("/api/quiz", methods=["POST"])
+def api_quiz():
+    data = request.get_json(silent=True) or request.form.to_dict() or {}
+    recommendations = tmdb_api.get_quiz_recommendations(data)
+
+    genre = data.get("genre", "")
+    language = data.get("language", "")
+    industry = data.get("industry", "")
+    analytics_tracker.record_quiz_completion(genre, language, industry)
+
+    if recommendations:
+        analytics_tracker.record_recommendation("Quiz", [m.get("title", "") for m in recommendations])
+
+    return jsonify({
+        "status": "ok",
+        "count": len(recommendations),
+        "recommendations": recommendations,
+    })
+
+
+# ============================================================
+# ANALYTICS DASHBOARD ROUTES
+# ============================================================
+
+@app.route("/analytics")
+def analytics():
+    movie_data = tmdb_api.get_analytics_movie_data()
+    user_analytics = analytics_tracker.get_user_analytics()
+    return render_template(
+        "analytics.html",
+        movie_data=movie_data,
+        user_analytics=user_analytics,
+        active_page="analytics",
+    )
+
+
+@app.route("/api/analytics")
+def api_analytics():
+    return jsonify({
+        "status": "ok",
+        "user_analytics": analytics_tracker.get_user_analytics(),
+        "movie_data": tmdb_api.get_analytics_movie_data(),
+    })
 
 
 # ============================================================
@@ -1371,7 +1495,10 @@ def recommendation():
             "index.html", selected_movie=None, recommendations=[], search_results=[],
             selected_media_type=None, error=None,
             notice=None, home_sections=get_home_sections(),
+            active_page="home",
         )
+
+    analytics_tracker.record_search(title)
 
     tmdb_results = list(cached_tmdb_search(normalize_search_text(title)))
     selected_tmdb = None
@@ -1404,6 +1531,7 @@ def recommendation():
             selected_media_type=None,
             error=f"'{title}' was not found on TMDB.", notice=None,
             home_sections=get_home_sections(),
+            active_page="home",
         )
 
     # Fetch full metadata once the user has selected a title. This supplies
@@ -1428,6 +1556,7 @@ def recommendation():
             selected_media_type="tv", error=None,
             notice="This is a TV series. TV recommendations are not enabled yet.",
             home_sections=get_home_sections(),
+            active_page="home",
         )
 
     tmdb_id = safe_string(selected_movie.get("tmdb_id", ""))
@@ -1435,6 +1564,12 @@ def recommendation():
         movie_to_dict(movie)
         for movie in smart_tmdb_recommendations(tmdb_id, 10)
     ]
+
+    if recommendations:
+        analytics_tracker.record_recommendation(
+            selected_movie.get("title", ""),
+            [m.get("title", "") for m in recommendations],
+        )
 
     total_time = time.perf_counter() - request_start
     print("TMDB movie:", selected_movie["title"])
@@ -1445,6 +1580,7 @@ def recommendation():
         "index.html", selected_movie=selected_movie, recommendations=recommendations,
         search_results=[], selected_media_type="movie", error=None, notice=None,
         home_sections=get_home_sections(),
+        active_page="home",
     )
 
 
@@ -1497,9 +1633,10 @@ if __name__ == "__main__":
     )
     print("=" * 70)
 
+    port = int(os.getenv("PORT", 5000))
     app.run(
         host="127.0.0.1",
-        port=5000,
+        port=port,
         debug=True,
         use_reloader=False,
         threaded=True,

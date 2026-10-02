@@ -20,3 +20,6 @@ Thumbs.db
 
 # Large ML model files
 models/*.pkl
+
+# Runtime data
+user_analytics.json

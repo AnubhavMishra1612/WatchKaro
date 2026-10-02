@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Explore movies with real-time TMDB category filters: Year, Language, Genre, Industry, Trending, and Top Rated.">
+    <title>WatchKaro — Explore & Category Filter</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="site-header">
+    <div class="header-inner">
+        <a class="brand" href="{{ url_for('home') }}" aria-label="WatchKaro Home">
+            <span class="brand-mark">M</span>
+            <span>
+                <strong>WatchKaro</strong>
+                <small>AI Movie Recommender</small>
+            </span>
+        </a>
+
+        <nav class="site-nav" aria-label="Main Navigation">
+            <a href="{{ url_for('home') }}" class="nav-item">Home</a>
+            <a href="{{ url_for('explore') }}" class="nav-item active">Explore</a>
+            <a href="{{ url_for('quiz') }}" class="nav-item">Find My Movie</a>
+            <a href="{{ url_for('analytics') }}" class="nav-item">Analytics</a>
+        </nav>
+
+        <div class="header-status">
+            <span class="status-dot"></span>
+            Live TMDB Discovery
+        </div>
+    </div>
+</header>
+
+<main class="page-shell">
+    <div class="explore-container">
+
+        <div class="hero-copy" style="margin-bottom: 28px;">
+            <span class="hero-kicker">DISCOVER CINEMA • MULTI-FILTER BROWSER</span>
+            <h1 style="font-size: clamp(32px, 4.5vw, 52px);">Explore Movies</h1>
+            <p>Filter across release years, original languages, genres, and film industries powered directly by live TMDB data.</p>
+        </div>
+
+        <!-- Filter Panel -->
+        <section class="filter-panel" aria-label="Movie Category Filters">
+            <!-- Preset Pills -->
+            <div class="preset-tabs" id="presetTabs" role="tablist">
+                <button type="button" class="preset-btn active" data-preset="popular" role="tab" aria-selected="true">
+                    ⭐ Popular
+                </button>
+                <button type="button" class="preset-btn" data-preset="trending" role="tab" aria-selected="false">
+                    🔥 Trending
+                </button>
+                <button type="button" class="preset-btn" data-preset="highest_rated" role="tab" aria-selected="false">
+                    🏆 Highest Rated
+                </button>
+                <button type="button" class="preset-btn" data-preset="most_voted" role="tab" aria-selected="false">
+                    👍 Most Voted
+                </button>
+                <button type="button" class="preset-btn" data-preset="new_releases" role="tab" aria-selected="false">
+                    ✨ New Releases
+                </button>
+            </div>
+
+            <!-- Filter Controls Grid -->
+            <div class="filter-grid">
+                <!-- Year Filter -->
+                <div class="filter-group">
+                    <label class="filter-label" for="filterYear">Release Year</label>
+                    <select id="filterYear" class="filter-select">
+                        <option value="all">All Years</option>
+                        <option value="2026">2026</option>
+                        <option value="2025">2025</option>
+                        <option value="2024">2024</option>
+                        <option value="2023">2023</option>
+                        <option value="2022">2022</option>
+                        <option value="2020-2021">2020 – 2021</option>
+                        <option value="2010s">2010s (2010–2019)</option>
+                        <option value="2000s">2000s (2000–2009)</option>
+                        <option value="1990s">1990s (1990–1999)</option>
+                        <option value="classic">Classics (Pre-1990)</option>
+                    </select>
+                </div>
+
+                <!-- Language Filter -->
+                <div class="filter-group">
+                    <label class="filter-label" for="filterLanguage">Language</label>
+                    <select id="filterLanguage" class="filter-select">
+                        <option value="all">All Languages</option>
+                        <option value="en">English</option>
+                        <option value="hi">Hindi</option>
+                        <option value="ta">Tamil</option>
+                        <option value="te">Telugu</option>
+                        <option value="ml">Malayalam</option>
+                        <option value="kn">Kannada</option>
+                        <option value="ko">Korean</option>
+                        <option value="ja">Japanese</option>
+                        <option value="es">Spanish</option>
+                        <option value="fr">French</option>
+                        <option value="de">German</option>
+                    </select>
+                </div>
+
+                <!-- Genre Filter -->
+                <div class="filter-group">
+                    <label class="filter-label" for="filterGenre">Genre</label>
+                    <select id="filterGenre" class="filter-select">
+                        <option value="all">All Genres</option>
+                        <option value="28">Action</option>
+                        <option value="12">Adventure</option>
+                        <option value="16">Animation</option>
+                        <option value="35">Comedy</option>
+                        <option value="80">Crime</option>
+                        <option value="99">Documentary</option>
+                        <option value="18">Drama</option>
+                        <option value="10751">Family</option>
+                        <option value="14">Fantasy</option>
+                        <option value="36">History</option>
+                        <option value="27">Horror</option>
+                        <option value="10402">Music</option>
+                        <option value="9648">Mystery</option>
+                        <option value="10749">Romance</option>
+                        <option value="878">Sci-Fi</option>
+                        <option value="53">Thriller</option>
+                        <option value="10752">War</option>
+                    </select>
+                </div>
+
+                <!-- Industry / Region Filter -->
+                <div class="filter-group">
+                    <label class="filter-label" for="filterIndustry">Industry / Region</label>
+                    <select id="filterIndustry" class="filter-select">
+                        <option value="all">All Regions / Global</option>
+                        <option value="hollywood">Hollywood (Global/US)</option>
+                        <option value="bollywood">Bollywood (Hindi Cinema)</option>
+                        <option value="south_indian">South Indian Cinema</option>
+                        <option value="asian">East Asian Cinema</option>
+                        <option value="european">European Cinema</option>
+                    </select>
+                </div>
+
+                <!-- Reset Button -->
+                <div class="filter-group">
+                    <button type="button" id="resetFilters" class="reset-filters-btn">
+                        ✕ Reset Filters
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Status & Result Count -->
+        <div class="results-status-bar">
+            <span>
+                Showing <strong id="resultsCount" class="results-count">{{ initial_movies | length }}</strong> titles
+                <span id="activePresetLabel" style="color: var(--muted); margin-left: 6px;">• Popular</span>
+            </span>
+            <div id="loadingIndicator" style="display: none; align-items: center; gap: 8px; color: var(--accent);">
+                <span class="status-dot" style="background: var(--accent); box-shadow: 0 0 10px rgba(255,193,7,0.5);"></span>
+                Updating...
+            </div>
+        </div>
+
+        <!-- Movie Grid -->
+        <div class="movie-grid" id="exploreGrid">
+            {% for movie in initial_movies %}
+                {% include "movie_card.html" %}
+            {% else %}
+                <div style="grid-column: 1 / -1; padding: 50px 20px; text-align: center; color: var(--muted);">
+                    No movies match these exact filters. Try broadening your criteria.
+                </div>
+            {% endfor %}
+        </div>
+
+    </div>
+</main>
+
+<footer class="site-footer">
+    <div>
+        <strong>WatchKaro</strong>
+        <span>Live TMDB Movie Discovery & Recommendation</span>
+    </div>
+    <div>
+        <span>TMDB Live API</span>
+        <span>•</span>
+        <span class="visitor-counter" aria-live="polite">
+            👥 <strong id="visitor-count">—</strong> unique visitors since launch
+        </span>
+    </div>
+</footer>
+
+<script>
+(() => {
+    "use strict";
+
+    const presetTabs = document.querySelectorAll(".preset-btn");
+    const yearSelect = document.getElementById("filterYear");
+    const langSelect = document.getElementById("filterLanguage");
+    const genreSelect = document.getElementById("filterGenre");
+    const indSelect = document.getElementById("filterIndustry");
+    const resetBtn = document.getElementById("resetFilters");
+    const grid = document.getElementById("exploreGrid");
+    const countLabel = document.getElementById("resultsCount");
+    const presetLabel = document.getElementById("activePresetLabel");
+    const loader = document.getElementById("loadingIndicator");
+
+    let currentPreset = "{{ active_preset or 'popular' }}";
+    let fetchController = null;
+
+    // Read initial URL params if present
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("preset")) currentPreset = urlParams.get("preset");
+    if (urlParams.get("year")) yearSelect.value = urlParams.get("year");
+    if (urlParams.get("language")) langSelect.value = urlParams.get("language");
+    if (urlParams.get("genre")) genreSelect.value = urlParams.get("genre");
+    if (urlParams.get("industry")) indSelect.value = urlParams.get("industry");
+
+    // Sync initial preset tab active state
+    presetTabs.forEach(btn => {
+        if (btn.dataset.preset === currentPreset) {
+            btn.classList.add("active");
+            btn.setAttribute("aria-selected", "true");
+            presetLabel.textContent = "• " + btn.textContent.trim();
+        } else {
+            btn.classList.remove("active");
+            btn.setAttribute("aria-selected", "false");
+        }
+    });
+
+    function escapeHtml(val) {
+        return String(val ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    function renderMovieCard(movie) {
+        const title = escapeHtml(movie.title || "Unknown");
+        const tmdbId = escapeHtml(movie.tmdb_id || "");
+        const mediaType = escapeHtml(movie.media_type || "movie");
+        const poster = movie.poster ? `<img src="${escapeHtml(movie.poster)}" alt="${title}" loading="lazy">` : `<div class="no-poster">No Poster</div>`;
+        const year = escapeHtml(movie.year || "N/A");
+        const lang = escapeHtml(movie.language || "Unknown");
+        const rating = escapeHtml(movie.rating || "0.0");
+        const genres = movie.genres ? `<div class="genre-line" title="${escapeHtml(movie.genres)}">${escapeHtml(movie.genres)}</div>` : "";
+        const scoreBadge = movie.match_score ? `<div class="match-score">Match ${escapeHtml(movie.match_score)}%</div>` : "";
+
+        return `
+            <a class="movie-card-link" href="/recommend?movie=${encodeURIComponent(movie.title)}&source=TMDB&media_type=${mediaType}&tmdb_id=${tmdbId}">
+                <article class="movie-card">
+                    <div class="poster-wrap">
+                        ${poster}
+                        <span class="source-pill">TMDB</span>
+                    </div>
+                    <div class="card-content">
+                        <h3 title="${title}">${title}</h3>
+                        <div class="card-meta">
+                            <span>📅 ${year}</span>
+                            <span>🌐 ${lang}</span>
+                            <span>⭐ ${rating}</span>
+                        </div>
+                        ${genres}
+                        ${scoreBadge}
+                    </div>
+                </article>
+            </a>
+        `;
+    }
+
+    function fetchFilteredMovies() {
+        if (fetchController) {
+            fetchController.abort();
+        }
+        fetchController = new AbortController();
+
+        loader.style.display = "inline-flex";
+
+        const params = new URLSearchParams({
+            preset: currentPreset,
+            year: yearSelect.value,
+            language: langSelect.value,
+            genre: genreSelect.value,
+            industry: indSelect.value
+        });
+
+        // Update URL cleanly without full reload
+        const newUrl = window.location.pathname + "?" + params.toString();
+        window.history.replaceState({}, "", newUrl);
+
+        fetch("/api/explore?" + params.toString(), {
+            signal: fetchController.signal
+        })
+        .then(res => res.json())
+        .then(movies => {
+            loader.style.display = "none";
+            if (!Array.isArray(movies) || movies.length === 0) {
+                countLabel.textContent = "0";
+                grid.innerHTML = `
+                    <div style="grid-column: 1 / -1; padding: 60px 20px; text-align: center; color: var(--muted);">
+                        <h3>No movies found</h3>
+                        <p style="margin-top: 8px;">No titles match your selected filters. Try broadening your criteria or selecting another industry.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            countLabel.textContent = movies.length;
+            grid.innerHTML = movies.map(renderMovieCard).join("");
+        })
+        .catch(err => {
+            if (err.name !== "AbortError") {
+                loader.style.display = "none";
+                console.error("Explore fetch error:", err);
+            }
+        });
+    }
+
+    // Preset button clicks
+    presetTabs.forEach(btn => {
+        btn.addEventListener("click", () => {
+            presetTabs.forEach(b => {
+                b.classList.remove("active");
+                b.setAttribute("aria-selected", "false");
+            });
+            btn.classList.add("active");
+            btn.setAttribute("aria-selected", "true");
+            currentPreset = btn.dataset.preset;
+            presetLabel.textContent = "• " + btn.textContent.trim();
+            fetchFilteredMovies();
+        });
+    });
+
+    // Dropdown change listeners
+    yearSelect.addEventListener("change", fetchFilteredMovies);
+    langSelect.addEventListener("change", fetchFilteredMovies);
+    genreSelect.addEventListener("change", fetchFilteredMovies);
+    indSelect.addEventListener("change", fetchFilteredMovies);
+
+    // Reset button
+    resetBtn.addEventListener("click", () => {
+        yearSelect.value = "all";
+        langSelect.value = "all";
+        genreSelect.value = "all";
+        indSelect.value = "all";
+        currentPreset = "popular";
+        presetTabs.forEach(btn => {
+            if (btn.dataset.preset === "popular") {
+                btn.classList.add("active");
+                btn.setAttribute("aria-selected", "true");
+                presetLabel.textContent = "• " + btn.textContent.trim();
+            } else {
+                btn.classList.remove("active");
+                btn.setAttribute("aria-selected", "false");
+            }
+        });
+        fetchFilteredMovies();
+    });
+
+    // Visitor counter
+    const counter = document.getElementById("visitor-count");
+    if (counter) {
+        fetch("/api/visitor-count")
+            .then(res => res.json())
+            .then(data => {
+                if (typeof data.unique_visitors === "number") {
+                    counter.textContent = data.unique_visitors.toLocaleString();
+                }
+            })
+            .catch(() => { counter.textContent = "—"; });
+    }
+})();
+</script>
+
+</body>
+</html>
