@@ -23,3 +23,4 @@ models/*.pkl
 
 # Runtime data
 user_analytics.json
+*.db

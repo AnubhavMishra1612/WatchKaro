@@ -233,8 +233,27 @@
     </div>
     <div>
         <span>No generative AI • Deterministic weighted scoring</span>
+        <span>•</span>
+        <span class="visitor-counter" aria-live="polite">
+            👥 <strong id="visitor-count">—</strong> unique visitors since launch
+        </span>
     </div>
 </footer>
+
+<script>
+    (function () {
+        const counter = document.getElementById("visitor-count");
+        if (!counter) return;
+        fetch("/api/visitor-count")
+            .then(res => res.json())
+            .then(data => {
+                if (typeof data.unique_visitors === "number") {
+                    counter.textContent = data.unique_visitors.toLocaleString();
+                }
+            })
+            .catch(() => { counter.textContent = "—"; });
+    })();
+</script>
 
 <script>
     document.addEventListener("DOMContentLoaded", function () {

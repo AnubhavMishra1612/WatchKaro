@@ -42,6 +42,7 @@ import os
 import re
 import time
 import secrets
+import sqlite3
 from bisect import bisect_left
 from datetime import date
 from difflib import SequenceMatcher
@@ -97,10 +98,14 @@ TMDB_ACCESS_TOKEN = os.getenv("TMDB_ACCESS_TOKEN", "").strip()
 # These values are kept in Render Environment Variables and are never
 # exposed to the browser.
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
+SUPABASE_KEY = os.getenv(
+    "SUPABASE_KEY",
+    os.getenv("SUPABASE_ANON_KEY", os.getenv("SUPABASE_SERVICE_KEY", os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")))
+).strip()
 SUPABASE_VISITORS_URL = f"{SUPABASE_URL}/rest/v1/visitors" if SUPABASE_URL else ""
 VISITOR_COOKIE_NAME = "watchkaro_visitor_id"
 VISITOR_COOKIE_MAX_AGE = 60 * 60 * 24 * 730  # about 2 years
+LOCAL_VISITOR_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "visitors.db")
 
 if TMDB_ACCESS_TOKEN:
     TMDB_HEADERS = {
@@ -114,104 +119,167 @@ else:
 
 
 # ============================================================
-# ANONYMOUS UNIQUE-VISITOR TRACKING — SUPABASE
+# ANONYMOUS UNIQUE-VISITOR TRACKING
 # ============================================================
 
 def _supabase_headers(prefer=""):
-    # Supabase's current sb_secret_* keys are API keys, not JWTs.
-    # They must be sent in the apikey header. Sending an sb_secret_* key
-    # as "Authorization: Bearer ..." can cause an Invalid JWT/401 response.
+    """Build Supabase PostgREST request headers.
+
+    If SUPABASE_KEY is a JWT (starts with eyJ), PostgREST requires it in
+    the Authorization header for role/RLS verification. If it is an sb_secret_*
+    API key, omitting Bearer prevents 'Invalid JWT' 401 responses.
+    """
     headers = {
         "apikey": SUPABASE_KEY,
         "Content-Type": "application/json",
     }
+    if SUPABASE_KEY.startswith("eyJ"):
+        headers["Authorization"] = f"Bearer {SUPABASE_KEY}"
     if prefer:
         headers["Prefer"] = prefer
     return headers
 
 
+def _init_local_visitor_db():
+    """Initialize local SQLite visitor table if Supabase is not configured."""
+    try:
+        with sqlite3.connect(LOCAL_VISITOR_DB) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS visitors (
+                    visitor_id TEXT PRIMARY KEY,
+                    first_seen TEXT,
+                    last_seen TEXT
+                )
+            """)
+            conn.commit()
+    except Exception as exc:
+        print(f"LOCAL VISITOR DB INIT ERROR: {exc}")
+
+
 def record_unique_visitor(visitor_id):
-    """Store a new anonymous browser visitor in Supabase.
+    """Store a new anonymous browser visitor in the connected database.
 
     The browser ID is random and contains no personal/device information.
-    The visitor cookie is only created after Supabase accepts the row.
+    The visitor cookie is only created after the database registers the record.
     """
-    if not SUPABASE_VISITORS_URL or not SUPABASE_KEY or not visitor_id:
+    if not visitor_id:
         return False
 
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    payload = {
-        "visitor_id": visitor_id,
-        "first_seen": now,
-        "last_seen": now,
-    }
 
-    try:
-        response = requests.post(
-            SUPABASE_VISITORS_URL,
-            headers=_supabase_headers("return=minimal"),
-            json=payload,
-            timeout=5,
-        )
+    # 1. Supabase (Primary when configured in environment, e.g. Render production)
+    if SUPABASE_VISITORS_URL and SUPABASE_KEY:
+        payload = {
+            "visitor_id": visitor_id,
+            "first_seen": now,
+            "last_seen": now,
+        }
+        try:
+            response = requests.post(
+                SUPABASE_VISITORS_URL,
+                headers=_supabase_headers("return=minimal,resolution=ignore-duplicates"),
+                json=payload,
+                timeout=5,
+            )
+            # 201 = newly created. 200/204 = success. 409 = already exists.
+            if response.status_code in (200, 201, 204, 409):
+                return True
 
-        # 201 = newly created. 409 means this ID already exists; either
-        # response means the browser has been successfully registered.
-        if response.status_code in (201, 409):
+            print(
+                "SUPABASE VISITOR ERROR: "
+                f"HTTP {response.status_code} - {response.text[:300]}"
+            )
+        except requests.RequestException as exc:
+            print(f"SUPABASE VISITOR ERROR: {exc}")
+
+    # 2. Local database fallback (used when remote database credentials are not present locally)
+    if not (SUPABASE_VISITORS_URL and SUPABASE_KEY):
+        try:
+            _init_local_visitor_db()
+            with sqlite3.connect(LOCAL_VISITOR_DB) as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO visitors (visitor_id, first_seen, last_seen) VALUES (?, ?, ?)",
+                    (visitor_id, now, now),
+                )
+                conn.commit()
             return True
+        except Exception as exc:
+            print(f"LOCAL VISITOR DB ERROR: {exc}")
+            return False
 
-        print(
-            "SUPABASE VISITOR ERROR: "
-            f"HTTP {response.status_code} - {response.text[:300]}"
-        )
-        return False
-    except requests.RequestException as exc:
-        print(f"SUPABASE VISITOR ERROR: {exc}")
-        return False
+    return False
 
 
 def get_unique_visitor_count():
-    """Return the exact number of rows in the visitors table."""
-    if not SUPABASE_VISITORS_URL or not SUPABASE_KEY:
-        return None
-
-    try:
-        response = requests.get(
-            SUPABASE_VISITORS_URL,
-            params={"select": "id", "limit": "1"},
-            headers=_supabase_headers("count=exact"),
-            timeout=5,
-        )
-        if not response.ok:
-            print(
-                "SUPABASE COUNT ERROR: "
-                f"HTTP {response.status_code} - {response.text[:300]}"
+    """Return the exact number of unique visitors recorded since launch."""
+    # 1. Supabase (Primary when configured in environment, e.g. Render production)
+    if SUPABASE_VISITORS_URL and SUPABASE_KEY:
+        try:
+            # First try select=visitor_id to match our primary column, fallback to select=*
+            response = requests.get(
+                SUPABASE_VISITORS_URL,
+                params={"select": "visitor_id", "limit": "1"},
+                headers=_supabase_headers("count=exact"),
+                timeout=5,
             )
+            if response.status_code == 400:
+                response = requests.get(
+                    SUPABASE_VISITORS_URL,
+                    params={"select": "*", "limit": "1"},
+                    headers=_supabase_headers("count=exact"),
+                    timeout=5,
+                )
+
+            if response.ok:
+                content_range = response.headers.get("Content-Range", "")
+                if "/" in content_range:
+                    total = content_range.rsplit("/", 1)[-1]
+                    if total.isdigit():
+                        return int(total)
+
+                # Fallback for environments that do not return Content-Range.
+                data = response.json()
+                if isinstance(data, list):
+                    return len(data)
+            else:
+                print(
+                    "SUPABASE COUNT ERROR: "
+                    f"HTTP {response.status_code} - {response.text[:300]}"
+                )
+        except (requests.RequestException, ValueError) as exc:
+            print(f"SUPABASE COUNT ERROR: {exc}")
+
+    # 2. Local database fallback (used when remote database credentials are not present locally)
+    if not (SUPABASE_VISITORS_URL and SUPABASE_KEY):
+        try:
+            _init_local_visitor_db()
+            with sqlite3.connect(LOCAL_VISITOR_DB) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM visitors")
+                row = cursor.fetchone()
+                return int(row[0]) if row else 0
+        except Exception as exc:
+            print(f"LOCAL VISITOR COUNT ERROR: {exc}")
             return None
 
-        content_range = response.headers.get("Content-Range", "")
-        if "/" in content_range:
-            total = content_range.rsplit("/", 1)[-1]
-            if total.isdigit():
-                return int(total)
-
-        # Fallback for environments that do not return Content-Range.
-        data = response.json()
-        return len(data) if isinstance(data, list) else None
-    except (requests.RequestException, ValueError) as exc:
-        print(f"SUPABASE COUNT ERROR: {exc}")
-        return None
+    return None
 
 
 @app.before_request
 def track_unique_visitor():
-    """Register a browser once, without touching static files.
+    """Register a browser once, without touching static files, health, or background counts.
 
     This intentionally counts unique browsers/visitors, not simultaneous
     active devices. A random first-party cookie is used as the anonymous
     visitor identifier; no IP address, IMEI, name, email, or GPS data is
     stored.
     """
-    if request.path.startswith("/static/"):
+    if (
+        request.path.startswith("/static/")
+        or request.path.startswith("/api/visitor-count")
+        or request.path == "/health"
+        or request.path == "/favicon.ico"
+    ):
         return
 
     visitor_id = request.cookies.get(VISITOR_COOKIE_NAME, "").strip()
@@ -228,12 +296,16 @@ def track_unique_visitor():
 def set_visitor_cookie(response):
     visitor_id = getattr(request, "_watchkaro_new_visitor_id", "")
     if visitor_id:
+        is_https = (
+            request.is_secure
+            or request.headers.get("X-Forwarded-Proto", "").lower() == "https"
+        )
         response.set_cookie(
             VISITOR_COOKIE_NAME,
             visitor_id,
             max_age=VISITOR_COOKIE_MAX_AGE,
             httponly=True,
-            secure=True,
+            secure=is_https,
             samesite="Lax",
             path="/",
         )
