@@ -39,7 +39,7 @@
             <a href="{{ url_for('home') }}" class="nav-item active">Home</a>
             <a href="{{ url_for('explore') }}" class="nav-item">Explore</a>
             <a href="{{ url_for('quiz') }}" class="nav-item">Find My Movie</a>
-            <a href="{{ url_for('analytics') }}" class="nav-item">Analytics</a>
+            <a href="{{ url_for('analytics') }}" class="nav-item">Movie Insights</a>
         </nav>
 
         <div class="header-status">
@@ -209,25 +209,42 @@
 
             <div class="selected-content">
 
-                <div class="badge-row">
-                    <span class="badge">
-                        {{ selected_movie.source }}
-                    </span>
+                <div class="selected-header-row">
+                    <div class="selected-header-info">
+                        <div class="badge-row">
+                            <span class="badge">
+                                {{ selected_movie.source }}
+                            </span>
 
-                    <span class="badge muted">
-                        {{ selected_movie.media_type | upper }}
-                    </span>
-                </div>
+                            <span class="badge muted">
+                                {{ selected_movie.media_type | upper }}
+                            </span>
+                        </div>
 
-                <h3>
-                    {{ selected_movie.title }}
-                </h3>
+                        <h3>
+                            {{ selected_movie.title }}
+                        </h3>
 
-                <div class="selected-meta">
-                    <span>📅 {{ selected_movie.year or "N/A" }}</span>
-                    <span>🌐 {{ selected_movie.language or "Unknown" }}</span>
-                    <span>⭐ {{ selected_movie.rating }}</span>
-                    <span>🎭 {{ selected_movie.genres or "Genre unavailable" }}</span>
+                        <div class="selected-meta">
+                            <span>📅 {{ selected_movie.year or "N/A" }}</span>
+                            <span>🌐 {{ selected_movie.language or "Unknown" }}</span>
+                            <span>⭐ {{ selected_movie.rating }}</span>
+                            <span>🎭 {{ selected_movie.genres or "Genre unavailable" }}</span>
+                        </div>
+                    </div>
+
+                    {% if collection_details and collection_details.parts %}
+                    <div class="selected-collection-action">
+                        <button
+                            type="button"
+                            class="btn-view-collection"
+                            id="viewSelectedCollectionBtn"
+                            aria-label="View Full Collection for {{ selected_movie.title }}"
+                        >
+                            View Full Collection →
+                        </button>
+                    </div>
+                    {% endif %}
                 </div>
 
                 {% if selected_movie.overview %}
@@ -257,6 +274,101 @@
             </div>
 
         </article>
+
+        <!-- DYNAMIC COLLECTION DETAIL MODAL -->
+        {% if collection_details and collection_details.parts %}
+        <div id="selectedCollectionModal" class="collection-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="selectedModalTitle">
+            <div class="collection-modal-card">
+                <div class="collection-modal-header">
+                    <div>
+                        <h3 id="selectedModalTitle">{{ collection_details.name }}</h3>
+                        <span style="font-size: 13px; color: var(--muted-gray); font-weight: 600;">
+                            {{ collection_details.count }} Movies{% if collection_details.year_range %} • {{ collection_details.year_range }}{% endif %}
+                        </span>
+                    </div>
+                    <button type="button" id="closeSelectedCollectionModal" class="modal-close-btn" aria-label="Close Collection Modal">✕</button>
+                </div>
+
+                <div class="collection-modal-body">
+                    {% if collection_details.overview %}
+                        <p style="font-size: 14px; color: var(--text-soft); line-height: 1.6; margin: 0 0 20px;">
+                            {{ collection_details.overview }}
+                        </p>
+                    {% endif %}
+
+                    <div class="collection-parts-grid">
+                        {% for part in collection_details.parts %}
+                        <a
+                            class="movie-card-link collection-part-card-link"
+                            href="{{ url_for('recommendation') }}?movie={{ part.title | urlencode }}&source=TMDB&media_type=movie&tmdb_id={{ part.tmdb_id or part.id }}"
+                        >
+                            <article class="movie-card" style="box-shadow: var(--shadow-sm);">
+                                <div class="poster-wrap">
+                                    {% if part.poster %}
+                                        <img src="{{ part.poster }}" alt="{{ part.title }}" loading="lazy">
+                                    {% else %}
+                                        <div class="no-poster">No Poster</div>
+                                    {% endif %}
+                                    <span class="source-pill">TMDB</span>
+                                </div>
+                                <div class="card-content" style="padding: 10px 12px 12px;">
+                                    <h3 title="{{ part.title }}" style="font-size: 13.5px;">{{ part.title }}</h3>
+                                    <div class="card-meta">
+                                        <span>📅 {{ part.year or (part.release_date[:4] if part.release_date else "N/A") }}</span>
+                                        {% if part.language %}
+                                        <span>🌐 {{ part.language }}</span>
+                                        {% endif %}
+                                        <span>⭐ {{ part.rating }}</span>
+                                    </div>
+                                </div>
+                            </article>
+                        </a>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            (function () {
+                const openBtn = document.getElementById("viewSelectedCollectionBtn");
+                const modal = document.getElementById("selectedCollectionModal");
+                const closeBtn = document.getElementById("closeSelectedCollectionModal");
+
+                function openModal() {
+                    if (modal) {
+                        modal.classList.add("open");
+                        document.body.style.overflow = "hidden";
+                    }
+                }
+
+                function closeModal() {
+                    if (modal) {
+                        modal.classList.remove("open");
+                        document.body.style.overflow = "";
+                    }
+                }
+
+                if (openBtn) {
+                    openBtn.addEventListener("click", openModal);
+                }
+
+                if (closeBtn) {
+                    closeBtn.addEventListener("click", closeModal);
+                }
+
+                if (modal) {
+                    modal.addEventListener("click", function (e) {
+                        if (e.target === modal) closeModal();
+                    });
+                }
+
+                document.addEventListener("keydown", function (e) {
+                    if (e.key === "Escape") closeModal();
+                });
+            })();
+        </script>
+        {% endif %}
 
     </section>
     {% endif %}
@@ -568,8 +680,8 @@
         <span>Find My Movie</span>
     </a>
     <a href="{{ url_for('analytics') }}" class="mobile-nav-item">
-        <svg class="mobile-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
-        <span>Analytics</span>
+        <svg class="mobile-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <span>Movie Insights</span>
     </a>
 </nav>
 

@@ -532,6 +532,7 @@ SEARCH_ALIASES = {
     "spiderman": "spider man",
     "interstelar": "interstellar",
     "intersteller": "interstellar",
+    "harry potter": "harry potter and the philosopher s stone",
 }
 
 
@@ -1318,6 +1319,16 @@ def movie_to_dict(movie):
         "director": ", ".join(director_names),
         "popularity": safe_float(movie.get("popularity"), 0.0),
         "match_score": movie.get("match_score"),
+        "belongs_to_collection": (
+            {
+                "id": movie["belongs_to_collection"].get("id"),
+                "name": safe_string(movie["belongs_to_collection"].get("name")),
+                "poster": get_poster_url(movie["belongs_to_collection"].get("poster_path")),
+                "backdrop": get_poster_url(movie["belongs_to_collection"].get("backdrop_path")),
+            }
+            if isinstance(movie.get("belongs_to_collection"), dict) and movie["belongs_to_collection"].get("id")
+            else None
+        ),
     }
 
 
@@ -1433,6 +1444,7 @@ def home():
         notice=None,
         home_sections=get_home_sections(),
         active_page="home",
+        collection_details=None,
     )
 
 
@@ -1518,11 +1530,56 @@ def api_quiz():
 
 
 # ============================================================
-# ANALYTICS DASHBOARD ROUTES
+# MOVIE INSIGHTS ROUTES & ANALYTICS PRESERVATION
 # ============================================================
 
-@app.route("/analytics")
-def analytics():
+@app.route("/movie-insights", endpoint="movie_insights")
+@app.route("/insights", endpoint="insights")
+@app.route("/analytics", endpoint="analytics")
+def movie_insights():
+    """Consumer-facing Movie Insights discovery dashboard."""
+    try:
+        insights_data = tmdb_api.get_movie_insights_data()
+    except Exception as exc:
+        print("Movie Insights fetch error:", exc)
+        insights_data = {}
+
+    return render_template(
+        "insights.html",
+        insights=insights_data,
+        active_page="insights",
+    )
+
+
+@app.route("/api/movie-insights")
+def api_movie_insights():
+    return jsonify({
+        "status": "ok",
+        "insights": tmdb_api.get_movie_insights_data(),
+    })
+
+
+@app.route("/api/collection/<int:collection_id>")
+def api_collection(collection_id):
+    col = tmdb_api.get_collection_details(collection_id)
+    if not col:
+        return jsonify({"error": "Collection not found"}), 404
+    return jsonify(col)
+
+
+@app.route("/api/analytics")
+def api_analytics():
+    """Preserved backend analytics endpoint for viva / admin / project demo."""
+    return jsonify({
+        "status": "ok",
+        "user_analytics": analytics_tracker.get_user_analytics(),
+        "movie_data": tmdb_api.get_analytics_movie_data(),
+    })
+
+
+@app.route("/viva-analytics")
+def viva_analytics():
+    """Preserved technical viva demonstration dashboard."""
     movie_data = tmdb_api.get_analytics_movie_data()
     user_analytics = analytics_tracker.get_user_analytics()
     return render_template(
@@ -1531,15 +1588,6 @@ def analytics():
         user_analytics=user_analytics,
         active_page="analytics",
     )
-
-
-@app.route("/api/analytics")
-def api_analytics():
-    return jsonify({
-        "status": "ok",
-        "user_analytics": analytics_tracker.get_user_analytics(),
-        "movie_data": tmdb_api.get_analytics_movie_data(),
-    })
 
 
 # ============================================================
@@ -1587,12 +1635,15 @@ def recommendation():
     # Otherwise prefer exact title, then movie over TV, then first result.
     normalized_title = normalize_search_text(title)
     if selected_tmdb is None:
+        alias_title = normalize_search_text(get_search_query(normalized_title))
         exact = [
             m for m in tmdb_results
-            if normalize_search_text(m.get("title", m.get("name", ""))) == normalized_title
+            if normalize_search_text(m.get("title", m.get("name", ""))) in (normalized_title, alias_title)
         ]
         if exact:
-            selected_tmdb = next((m for m in exact if m.get("media_type") == "movie"), exact[0])
+            selected_tmdb = next((m for m in exact if m.get("media_type") == "movie"), None)
+            if selected_tmdb is None:
+                selected_tmdb = next((m for m in tmdb_results if m.get("media_type") == "movie"), exact[0])
 
     if selected_tmdb is None:
         selected_tmdb = next((m for m in tmdb_results if m.get("media_type") == "movie"), None)
@@ -1650,11 +1701,23 @@ def recommendation():
     print("Recommendations:", len(recommendations))
     print(f"TOTAL REQUEST TIME: {total_time:.4f}s")
 
+    # Dynamic collection detection for selected movie
+    collection_details = None
+    if selected_movie.get("belongs_to_collection"):
+        col_id = selected_movie["belongs_to_collection"].get("id")
+        if col_id:
+            try:
+                collection_details = tmdb_api.get_collection_details(col_id)
+            except Exception as exc:
+                print("Error loading collection details:", exc)
+                collection_details = None
+
     return render_template(
         "index.html", selected_movie=selected_movie, recommendations=recommendations,
         search_results=[], selected_media_type="movie", error=None, notice=None,
         home_sections=get_home_sections(),
         active_page="home",
+        collection_details=collection_details,
     )
 
 

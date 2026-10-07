@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="WatchKaro Movie Insights: Discover 2026 movie trends, upcoming releases, legendary movie collections, and cinema around the world.">
+    <title>WatchKaro — Movie Insights & Cinema Trends</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<!-- SITE HEADER -->
+<header class="site-header">
+    <div class="header-inner">
+        <a class="brand" href="{{ url_for('home') }}" aria-label="WatchKaro Home">
+            <span class="brand-mark">M</span>
+            <span>
+                <strong>WatchKaro</strong>
+                <small>AI Movie Recommender</small>
+            </span>
+        </a>
+
+        <!-- MAIN DESKTOP NAVIGATION -->
+        <nav class="site-nav" aria-label="Main Navigation">
+            <a href="{{ url_for('home') }}" class="nav-item">Home</a>
+            <a href="{{ url_for('explore') }}" class="nav-item">Explore</a>
+            <a href="{{ url_for('quiz') }}" class="nav-item">Find My Movie</a>
+            <a href="{{ url_for('movie_insights') }}" class="nav-item active">Movie Insights</a>
+        </nav>
+
+        <div class="header-status">
+            <span class="status-dot"></span>
+            Live Movie Discovery
+        </div>
+    </div>
+</header>
+
+<!-- MAIN CONTENT SHELL -->
+<main class="page-shell">
+    <div class="insights-container">
+
+        <!-- ============================================================
+             1. HERO
+             ============================================================ -->
+        <div class="insights-hero">
+            <span class="hero-kicker">CINEMA SPOTLIGHT & TRENDS</span>
+            <h1>MOVIE INSIGHTS</h1>
+            <p>Discover what's trending, what's coming next, and what movie fans are watching around the world.</p>
+        </div>
+
+
+        <!-- ============================================================
+             2. MOVIE OF THE MONTH
+             ============================================================ -->
+        {% if insights and insights.movie_of_the_month %}
+        {% set motm = insights.movie_of_the_month %}
+        <section class="insight-section" aria-label="Movie of the Month">
+            <div class="motm-card-redesigned">
+                <div class="motm-poster-frame">
+                    {% if motm.poster %}
+                        <img src="{{ motm.poster }}" alt="{{ motm.title }}" loading="lazy">
+                    {% else %}
+                        <div class="no-poster large">No Poster</div>
+                    {% endif %}
+                </div>
+
+                <div class="motm-info-col">
+                    <span class="motm-header-badge">
+                        ⭐ Movie of the Month • {{ motm.motm_month or "October 2026" }}
+                    </span>
+
+                    <a class="motm-title-link" href="{{ url_for('recommendation') }}?movie={{ motm.title | urlencode }}&source=TMDB&media_type={{ motm.media_type }}&tmdb_id={{ motm.tmdb_id }}">
+                        {{ motm.title }}
+                    </a>
+
+                    <!-- Clean Consumer Meta Chips -->
+                    <div class="motm-chips-grid">
+                        <div class="motm-chip highlight">
+                            ⭐ Rating: <strong>{{ motm.rating }} / 10</strong>
+                        </div>
+                        <div class="motm-chip">
+                            🗳️ Votes: <strong>{{ motm.vote_count }}</strong>
+                        </div>
+                        <div class="motm-chip">
+                            🌐 Language: <strong>{{ motm.language or "Unknown" }}</strong>
+                        </div>
+                        <div class="motm-chip">
+                            📅 Year: <strong>{{ motm.year or "2026" }}</strong>
+                        </div>
+                        {% if motm.genres %}
+                        <div class="motm-chip">
+                            🎭 Genre: <strong>{{ motm.genres }}</strong>
+                        </div>
+                        {% endif %}
+                        <div class="motm-chip">
+                            🔥 Popularity: <strong>{{ motm.popularity }}</strong>
+                        </div>
+                    </div>
+
+                    {% if motm.overview %}
+                        <p class="motm-synopsis">{{ motm.overview }}</p>
+                    {% endif %}
+
+                    <!-- Clean Consumer Selection Statement -->
+                    <div class="motm-consumer-signal">
+                        <span style="font-size: 16px;">✨</span>
+                        <span>Selected using release, rating, voting activity and popularity signals.</span>
+                    </div>
+
+                    <div>
+                        <a class="motm-cta-btn" href="{{ url_for('recommendation') }}?movie={{ motm.title | urlencode }}&source=TMDB&media_type={{ motm.media_type }}&tmdb_id={{ motm.tmdb_id }}">
+                            Get Recommendations For This Movie →
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </section>
+        {% endif %}
+
+
+        <!-- ============================================================
+             3. 2026 MOVIE TRENDS
+             ============================================================ -->
+        {% if insights and insights.trends_2026 %}
+        {% set trends = insights.trends_2026 %}
+        <section class="insight-section" aria-label="2026 Movie Trends">
+            <div class="insight-section-heading">
+                <div class="insight-section-title-wrap">
+                    <h2>2026 Movie Trends</h2>
+                    <p>Current buzz, critical acclaim, and popular favorites from 2026 cinema.</p>
+                </div>
+                <span class="section-pill-badge">Live TMDB Data</span>
+            </div>
+
+            <!-- Category Switcher Tabs -->
+            <div class="insights-pill-tabs" id="trendsTabs" role="tablist">
+                <button type="button" class="insights-tab-btn active" data-target="panel-trending" role="tab" aria-selected="true">
+                    🔥 Trending Now
+                </button>
+                <button type="button" class="insights-tab-btn" data-target="panel-highest-rated" role="tab" aria-selected="false">
+                    ⭐ Highest Rated
+                </button>
+                <button type="button" class="insights-tab-btn" data-target="panel-most-voted" role="tab" aria-selected="false">
+                    🗳 Most Voted
+                </button>
+                <button type="button" class="insights-tab-btn" data-target="panel-most-popular" role="tab" aria-selected="false">
+                    ❤️ Most Popular
+                </button>
+            </div>
+
+            <!-- Tab Panels -->
+            <div id="trendsPanels">
+                <!-- Trending Now -->
+                <div id="panel-trending" class="trends-panel active">
+                    {% if trends.trending_now %}
+                        <div class="movie-grid">
+                            {% for movie in trends.trending_now[:10] %}
+                                {% include "movie_card.html" %}
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="section-empty-fallback">Trending movies are temporarily updating.</div>
+                    {% endif %}
+                </div>
+
+                <!-- Highest Rated -->
+                <div id="panel-highest-rated" class="trends-panel" style="display: none;">
+                    {% if trends.highest_rated %}
+                        <div class="movie-grid">
+                            {% for movie in trends.highest_rated[:10] %}
+                                {% include "movie_card.html" %}
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="section-empty-fallback">Highest rated movies are temporarily updating.</div>
+                    {% endif %}
+                </div>
+
+                <!-- Most Voted -->
+                <div id="panel-most-voted" class="trends-panel" style="display: none;">
+                    {% if trends.most_voted %}
+                        {% set show_votes = true %}
+                        <div class="movie-grid">
+                            {% for movie in trends.most_voted[:10] %}
+                                {% include "movie_card.html" %}
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="section-empty-fallback">Most voted movies are temporarily updating.</div>
+                    {% endif %}
+                </div>
+
+                <!-- Most Popular -->
+                <div id="panel-most-popular" class="trends-panel" style="display: none;">
+                    {% if trends.most_popular %}
+                        <div class="movie-grid">
+                            {% for movie in trends.most_popular[:10] %}
+                                {% include "movie_card.html" %}
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="section-empty-fallback">Popular movies are temporarily updating.</div>
+                    {% endif %}
+                </div>
+            </div>
+        </section>
+        {% endif %}
+
+
+        <!-- ============================================================
+             4. COMING SOON
+             ============================================================ -->
+        <section class="insight-section" aria-label="Coming Soon Releases">
+            <div class="insight-section-heading">
+                <div class="insight-section-title-wrap">
+                    <h2>Coming Soon</h2>
+                    <p>Future releases arriving in theatres and on streaming platforms.</p>
+                </div>
+                <span class="section-pill-badge">Upcoming Calendar</span>
+            </div>
+
+            <!-- Filter Pills -->
+            <div class="insights-pill-tabs" id="comingSoonTabs" role="tablist">
+                <button type="button" class="insights-tab-btn active" data-target="panel-cs-7" role="tab" aria-selected="true">
+                    Next 7 Days
+                </button>
+                <button type="button" class="insights-tab-btn" data-target="panel-cs-30" role="tab" aria-selected="false">
+                    Next 30 Days
+                </button>
+                <button type="button" class="insights-tab-btn" data-target="panel-cs-90" role="tab" aria-selected="false">
+                    Next 3 Months
+                </button>
+                <button type="button" class="insights-tab-btn" data-target="panel-cs-anticipated" role="tab" aria-selected="false">
+                    Most Anticipated
+                </button>
+            </div>
+
+            <!-- Panels -->
+            <div id="comingSoonPanels">
+                {% set show_release_date = true %}
+
+                <!-- Next 7 Days -->
+                <div id="panel-cs-7" class="coming-soon-panel active">
+                    {% if insights and insights.coming_soon and insights.coming_soon.next_7_days %}
+                        <div class="movie-grid">
+                            {% for movie in insights.coming_soon.next_7_days[:10] %}
+                                {% include "movie_card.html" %}
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="section-empty-fallback">Upcoming movies are temporarily unavailable.</div>
+                    {% endif %}
+                </div>
+
+                <!-- Next 30 Days -->
+                <div id="panel-cs-30" class="coming-soon-panel" style="display: none;">
+                    {% if insights and insights.coming_soon and insights.coming_soon.next_30_days %}
+                        <div class="movie-grid">
+                            {% for movie in insights.coming_soon.next_30_days[:10] %}
+                                {% include "movie_card.html" %}
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="section-empty-fallback">Upcoming movies are temporarily unavailable.</div>
+                    {% endif %}
+                </div>
+
+                <!-- Next 3 Months -->
+                <div id="panel-cs-90" class="coming-soon-panel" style="display: none;">
+                    {% if insights and insights.coming_soon and insights.coming_soon.next_90_days %}
+                        <div class="movie-grid">
+                            {% for movie in insights.coming_soon.next_90_days[:10] %}
+                                {% include "movie_card.html" %}
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="section-empty-fallback">Upcoming movies are temporarily unavailable.</div>
+                    {% endif %}
+                </div>
+
+                <!-- Most Anticipated -->
+                <div id="panel-cs-anticipated" class="coming-soon-panel" style="display: none;">
+                    {% if insights and insights.coming_soon and insights.coming_soon.most_anticipated %}
+                        <div class="movie-grid">
+                            {% for movie in insights.coming_soon.most_anticipated[:10] %}
+                                {% include "movie_card.html" %}
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="section-empty-fallback">Upcoming movies are temporarily unavailable.</div>
+                    {% endif %}
+                </div>
+            </div>
+        </section>
+
+
+        <!-- ============================================================
+             5. RECENTLY RELEASED
+             ============================================================ -->
+        {% if insights and insights.recently_released %}
+        <section class="insight-section" aria-label="Recently Released Movies">
+            <div class="insight-section-heading">
+                <div class="insight-section-title-wrap">
+                    <h2>Recently Released</h2>
+                    <p>New 2026 films released recently, sorted newest first.</p>
+                </div>
+                <span class="section-pill-badge">Newest First</span>
+            </div>
+
+            {% set show_release_date = true %}
+            {% set show_votes = true %}
+            <div class="movie-grid">
+                {% for movie in insights.recently_released[:10] %}
+                    {% include "movie_card.html" %}
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+
+
+        <!-- ============================================================
+             6. MOVIE COLLECTIONS
+             ============================================================ -->
+        {% if insights and insights.collections %}
+        <section class="insight-section" aria-label="Movie Collections">
+            <div class="insight-section-heading">
+                <div class="insight-section-title-wrap">
+                    <h2>Movie Collections</h2>
+                    <p>Legendary cinema franchises and complete multi-movie sagas powered by TMDB collection records.</p>
+                </div>
+                <span class="section-pill-badge">{{ insights.collections | length }} Iconic Sagas</span>
+            </div>
+
+            <div class="collections-grid">
+                {% for col in insights.collections %}
+                <article class="collection-card">
+                    <div>
+                        <div class="collection-card-top">
+                            <div class="collection-thumb">
+                                {% if col.poster %}
+                                    <img src="{{ col.poster }}" alt="{{ col.name }}" loading="lazy">
+                                {% else %}
+                                    <div class="no-poster">Poster</div>
+                                {% endif %}
+                            </div>
+                            <div class="collection-meta-wrap">
+                                <h3 class="collection-name">{{ col.name }}</h3>
+                                <div class="collection-badges">
+                                    <span class="collection-badge">{{ col.count }} Movies</span>
+                                    {% if col.year_range %}
+                                        <span class="collection-badge year">{{ col.year_range }}</span>
+                                    {% endif %}
+                                </div>
+                                {% if col.overview %}
+                                    <p class="collection-desc">{{ col.overview }}</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <button
+                            type="button"
+                            class="collection-action-btn view-collection-trigger"
+                            data-col-id="{{ col.id }}"
+                            data-col-name="{{ col.name }}"
+                            data-col-count="{{ col.count }}"
+                            data-col-years="{{ col.year_range }}"
+                            data-col-overview="{{ col.overview }}"
+                            data-col-parts='{{ col.parts | tojson | forceescape }}'
+                        >
+                            View Collection →
+                        </button>
+                    </div>
+                </article>
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+
+
+        <!-- ============================================================
+             7. GENRE INSIGHTS ("WHAT'S POPULAR?")
+             ============================================================ -->
+        {% if insights and insights.genre_insights %}
+        <section class="insight-section" aria-label="Genre Insights">
+            <div class="insight-section-heading">
+                <div class="insight-section-title-wrap">
+                    <h2>What's Popular?</h2>
+                    <p>Explore high-demand genres with active catalog counts and top representative titles.</p>
+                </div>
+                <span class="section-pill-badge">8 Core Genres</span>
+            </div>
+
+            <div class="genre-insights-grid">
+                {% for g in insights.genre_insights %}
+                <a class="genre-insight-card" href="{{ g.explore_url }}">
+                    <div>
+                        <div class="genre-card-header">
+                            <div class="genre-card-title">
+                                <span class="genre-icon">{{ g.icon }}</span>
+                                <span>{{ g.name }}</span>
+                            </div>
+                            <span class="genre-volume-badge">{{ g.total_count }}</span>
+                        </div>
+
+                        <p class="genre-desc">{{ g.desc }}</p>
+
+                        {% if g.top_movies and g.top_movies[0] %}
+                        {% set top_m = g.top_movies[0] %}
+                        <div class="genre-representative-box">
+                            <div class="genre-rep-thumb">
+                                {% if top_m.poster %}
+                                    <img src="{{ top_m.poster }}" alt="{{ top_m.title }}" loading="lazy">
+                                {% else %}
+                                    <div class="no-poster">Movie</div>
+                                {% endif %}
+                            </div>
+                            <div class="genre-rep-info">
+                                <span class="genre-rep-lbl">Featured Title</span>
+                                <div class="genre-rep-title" title="{{ top_m.title }}">{{ top_m.title }}</div>
+                                <div class="genre-rep-rating">⭐ {{ top_m.rating }} • {{ top_m.year or "2026" }}</div>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="genre-card-action">
+                        <span>Explore {{ g.name }} in Explore</span>
+                        <span class="arrow">→</span>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+
+
+        <!-- ============================================================
+             8. CINEMA AROUND THE WORLD
+             ============================================================ -->
+        {% if insights and insights.cinema_world %}
+        <section class="insight-section" aria-label="Cinema Around the World">
+            <div class="insight-section-heading">
+                <div class="insight-section-title-wrap">
+                    <h2>Cinema Around the World</h2>
+                    <p>Discover vibrant storytelling, auteur directors, and cinematic movements across diverse cultures.</p>
+                </div>
+                <span class="section-pill-badge">Global Film Traditions</span>
+            </div>
+
+            <!-- Regional Industry Discovery Grid -->
+            <div class="cinema-world-grid">
+                {% for region in insights.cinema_world %}
+                <a class="world-region-card" href="{{ region.explore_url }}">
+                    <div>
+                        <div class="world-region-header">
+                            <span class="world-flag">{{ region.flag }}</span>
+                            <h3 class="world-region-name">{{ region.name }}</h3>
+                        </div>
+
+                        <p class="world-tagline">{{ region.tagline }}</p>
+
+                        {% if region.top_movie %}
+                        <div class="world-rep-box">
+                            <div class="world-rep-thumb">
+                                {% if region.top_movie.poster %}
+                                    <img src="{{ region.top_movie.poster }}" alt="{{ region.top_movie.title }}" loading="lazy">
+                                {% else %}
+                                    <div class="no-poster">Cinema</div>
+                                {% endif %}
+                            </div>
+                            <div class="world-rep-info">
+                                <span class="world-rep-lbl">Representative Title</span>
+                                <div class="world-rep-title" title="{{ region.top_movie.title }}">{{ region.top_movie.title }}</div>
+                                <div class="world-rep-meta">⭐ {{ region.top_movie.rating }} • {{ region.top_movie.year or "2026" }}</div>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="world-card-action">
+                        <span>Explore {{ region.name }}</span>
+                        <span class="arrow">→</span>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+
+            <!-- Language Discovery Shortcuts Bar -->
+            {% if insights.language_shortcuts %}
+            <div class="language-discovery-card">
+                <h3 class="language-discovery-title">
+                    <span>🌐</span>
+                    <span>Browse By Original Language</span>
+                </h3>
+                <div class="language-shortcuts-wrap">
+                    {% for lang in insights.language_shortcuts %}
+                        <a href="{{ url_for('explore') }}?language={{ lang.code }}" class="lang-shortcut-chip">
+                            <span>{{ lang.flag }}</span>
+                            <span>{{ lang.name }}</span>
+                        </a>
+                    {% endfor %}
+                </div>
+                <p class="cinema-world-disclaimer">
+                    Regional cinema classifications are curated for cultural discovery based on original language and regional film distribution patterns.
+                </p>
+            </div>
+            {% endif %}
+        </section>
+        {% endif %}
+
+    </div>
+</main>
+
+
+<!-- ============================================================
+     COLLECTION DETAIL MODAL
+     ============================================================ -->
+<div id="collectionModalBackdrop" class="collection-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalColTitle">
+    <div class="collection-modal-card">
+        <div class="collection-modal-header">
+            <div>
+                <h3 id="modalColTitle">Collection Name</h3>
+                <span id="modalColMeta" style="font-size: 13px; color: var(--muted-gray); font-weight: 600;">8 Movies • 2002–2026</span>
+            </div>
+            <button type="button" id="modalCloseBtn" class="modal-close-btn" aria-label="Close Collection Modal">✕</button>
+        </div>
+
+        <div class="collection-modal-body">
+            <p id="modalColOverview" style="font-size: 14px; color: var(--text-soft); line-height: 1.6; margin: 0 0 20px;"></p>
+            <div id="modalPartsGrid" class="collection-parts-grid"></div>
+        </div>
+    </div>
+</div>
+
+
+<!-- SITE FOOTER -->
+<footer class="site-footer">
+    <div>
+        <strong>WatchKaro</strong>
+        <span>Live TMDB Movie Insights & Cultural Cinema Discovery</span>
+    </div>
+    <div>
+        <span>TMDB Live API</span>
+        <span>•</span>
+        <span class="visitor-counter" aria-live="polite">
+            👥 <strong id="visitor-count">—</strong> unique visitors since launch
+        </span>
+    </div>
+</footer>
+
+
+<!-- VISITOR COUNTER SCRIPT -->
+<script>
+    (function () {
+        const counter = document.getElementById("visitor-count");
+        if (!counter) return;
+
+        fetch("/api/visitor-count")
+            .then(res => res.json())
+            .then(data => {
+                if (typeof data.unique_visitors === "number") {
+                    counter.textContent = data.unique_visitors.toLocaleString();
+                }
+            })
+            .catch(() => { counter.textContent = "—"; });
+    })();
+</script>
+
+
+<!-- INTERACTIVE TAB SWITCHER & COLLECTION MODAL SCRIPT -->
+<script>
+    (function () {
+        "use strict";
+
+        // Tab Switcher Helper
+        function initTabSwitcher(tabContainerId, panelContainerId) {
+            const container = document.getElementById(tabContainerId);
+            const panelsWrap = document.getElementById(panelContainerId);
+            if (!container || !panelsWrap) return;
+
+            const tabs = container.querySelectorAll(".insights-tab-btn");
+            const panels = panelsWrap.querySelectorAll("div[id^='panel-']");
+
+            tabs.forEach(tab => {
+                tab.addEventListener("click", () => {
+                    const targetId = tab.dataset.target;
+
+                    // Switch active button
+                    tabs.forEach(t => {
+                        t.classList.remove("active");
+                        t.setAttribute("aria-selected", "false");
+                    });
+                    tab.classList.add("active");
+                    tab.setAttribute("aria-selected", "true");
+
+                    // Switch active panel
+                    panels.forEach(p => {
+                        if (p.id === targetId) {
+                            p.style.display = "block";
+                            p.classList.add("active");
+                        } else {
+                            p.style.display = "none";
+                            p.classList.remove("active");
+                        }
+                    });
+                });
+            });
+        }
+
+        initTabSwitcher("trendsTabs", "trendsPanels");
+        initTabSwitcher("comingSoonTabs", "comingSoonPanels");
+
+        // Collection Modal Functionality
+        const modalBackdrop = document.getElementById("collectionModalBackdrop");
+        const modalCloseBtn = document.getElementById("modalCloseBtn");
+        const modalTitle = document.getElementById("modalColTitle");
+        const modalMeta = document.getElementById("modalColMeta");
+        const modalOverview = document.getElementById("modalColOverview");
+        const modalPartsGrid = document.getElementById("modalPartsGrid");
+
+        function closeModal() {
+            if (modalBackdrop) {
+                modalBackdrop.classList.remove("open");
+                document.body.style.overflow = "";
+            }
+        }
+
+        if (modalCloseBtn) {
+            modalCloseBtn.addEventListener("click", closeModal);
+        }
+
+        if (modalBackdrop) {
+            modalBackdrop.addEventListener("click", (e) => {
+                if (e.target === modalBackdrop) closeModal();
+            });
+        }
+
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") closeModal();
+        });
+
+        // Trigger buttons
+        document.querySelectorAll(".view-collection-trigger").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const name = btn.dataset.colName || "Collection";
+                const count = btn.dataset.colCount || "";
+                const years = btn.dataset.colYears || "";
+                const overview = btn.dataset.colOverview || "";
+                let parts = [];
+
+                try {
+                    parts = JSON.parse(btn.dataset.colParts || "[]");
+                } catch (e) {
+                    parts = [];
+                }
+
+                modalTitle.textContent = name;
+                modalMeta.textContent = `${count} Movies ${years ? "• " + years : ""}`;
+                modalOverview.textContent = overview;
+
+                // Render parts
+                modalPartsGrid.innerHTML = "";
+                if (parts.length > 0) {
+                    parts.forEach(movie => {
+                        const mTitle = movie.title || "Movie";
+                        const mPoster = movie.poster;
+                        const mYear = movie.year || "";
+                        const mRating = movie.rating || "0.0";
+                        const mLink = `/recommend?movie=${encodeURIComponent(mTitle)}&source=TMDB&media_type=movie&tmdb_id=${encodeURIComponent(movie.tmdb_id || movie.id || "")}`;
+
+                        const cardEl = document.createElement("a");
+                        cardEl.href = mLink;
+                        cardEl.className = "movie-card-link";
+                        cardEl.innerHTML = `
+                            <article class="movie-card" style="box-shadow: var(--shadow-sm);">
+                                <div class="poster-wrap">
+                                    ${mPoster ? `<img src="${mPoster}" alt="${mTitle}" loading="lazy">` : `<div class="no-poster">No Poster</div>`}
+                                    <span class="source-pill">TMDB</span>
+                                </div>
+                                <div class="card-content" style="padding: 10px 12px 12px;">
+                                    <h3 title="${mTitle}" style="font-size: 13.5px;">${mTitle}</h3>
+                                    <div class="card-meta">
+                                        <span>📅 ${mYear || "N/A"}</span>
+                                        <span>⭐ ${mRating}</span>
+                                    </div>
+                                </div>
+                            </article>
+                        `;
+                        modalPartsGrid.appendChild(cardEl);
+                    });
+                } else {
+                    modalPartsGrid.innerHTML = `<div style="grid-column: 1 / -1; color: var(--muted-gray);">No detailed movie entries available for this collection.</div>`;
+                }
+
+                modalBackdrop.classList.add("open");
+                document.body.style.overflow = "hidden";
+            });
+        });
+    })();
+</script>
+
+
+<!-- FLOATING MOBILE BOTTOM NAVIGATION -->
+<nav class="mobile-bottom-nav" aria-label="Mobile Navigation">
+    <a href="{{ url_for('home') }}" class="mobile-nav-item">
+        <svg class="mobile-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <span>Home</span>
+    </a>
+    <a href="{{ url_for('explore') }}" class="mobile-nav-item">
+        <svg class="mobile-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+        <span>Explore</span>
+    </a>
+    <a href="{{ url_for('quiz') }}" class="mobile-nav-item">
+        <svg class="mobile-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span>Find My Movie</span>
+    </a>
+    <a href="{{ url_for('movie_insights') }}" class="mobile-nav-item active">
+        <svg class="mobile-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <span>Movie Insights</span>
+    </a>
+</nav>
+
+</body>
+</html>

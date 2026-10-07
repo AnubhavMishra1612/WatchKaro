@@ -36,7 +36,7 @@
 
             <div class="card-meta">
                 <span>
-                    📅 {{ movie.year or "N/A" }}
+                    📅 {% if movie.release_date and (show_release_date or not movie.year) %}{{ movie.release_date }}{% else %}{{ movie.year or "N/A" }}{% endif %}
                 </span>
 
                 <span>
@@ -46,6 +46,12 @@
                 <span>
                     ⭐ {{ movie.rating }}
                 </span>
+
+                {% if (show_votes or movie.show_votes) and movie.vote_count %}
+                <span>
+                    🗳️ {{ movie.vote_count }}
+                </span>
+                {% endif %}
             </div>
 
             {% if movie.genres %}

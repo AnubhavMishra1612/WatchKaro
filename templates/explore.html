@@ -23,7 +23,7 @@
             <a href="{{ url_for('home') }}" class="nav-item">Home</a>
             <a href="{{ url_for('explore') }}" class="nav-item active">Explore</a>
             <a href="{{ url_for('quiz') }}" class="nav-item">Find My Movie</a>
-            <a href="{{ url_for('analytics') }}" class="nav-item">Analytics</a>
+            <a href="{{ url_for('analytics') }}" class="nav-item">Movie Insights</a>
         </nav>
 
         <div class="header-status">
@@ -219,7 +219,18 @@
     if (urlParams.get("preset")) currentPreset = urlParams.get("preset");
     if (urlParams.get("year")) yearSelect.value = urlParams.get("year");
     if (urlParams.get("language")) langSelect.value = urlParams.get("language");
-    if (urlParams.get("genre")) genreSelect.value = urlParams.get("genre");
+    const genreParam = urlParams.get("genre");
+    if (genreParam) {
+        let matched = false;
+        for (let opt of genreSelect.options) {
+            if (opt.value.toLowerCase() === genreParam.toLowerCase() || opt.text.toLowerCase() === genreParam.toLowerCase()) {
+                genreSelect.value = opt.value;
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) genreSelect.value = genreParam;
+    }
     if (urlParams.get("industry")) indSelect.value = urlParams.get("industry");
 
     // Sync initial preset tab active state
@@ -400,8 +411,8 @@
         <span>Find My Movie</span>
     </a>
     <a href="{{ url_for('analytics') }}" class="mobile-nav-item">
-        <svg class="mobile-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
-        <span>Analytics</span>
+        <svg class="mobile-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <span>Movie Insights</span>
     </a>
 </nav>
 

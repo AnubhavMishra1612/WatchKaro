@@ -15,7 +15,7 @@
 import os
 import math
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -212,6 +212,16 @@ def format_tmdb_movie(item):
         "cast": ", ".join(cast_names),
         "director": ", ".join(director_names),
         "match_score": item.get("match_score"),
+        "belongs_to_collection": (
+            {
+                "id": item["belongs_to_collection"].get("id"),
+                "name": str(item["belongs_to_collection"].get("name") or ""),
+                "poster": get_poster_url(item["belongs_to_collection"].get("poster_path")),
+                "backdrop": get_poster_url(item["belongs_to_collection"].get("backdrop_path")),
+            }
+            if isinstance(item.get("belongs_to_collection"), dict) and item["belongs_to_collection"].get("id")
+            else None
+        ),
     }
 
 
@@ -527,8 +537,11 @@ def discover_movies(
 
     # 3. Genre Filter
     genre_str = str(genre or "all").strip()
-    if genre_str != "all" and genre_str.isdigit():
-        params["with_genres"] = genre_str
+    if genre_str != "all":
+        if genre_str.isdigit():
+            params["with_genres"] = genre_str
+        elif genre_str.lower() in GENRE_NAME_TO_ID:
+            params["with_genres"] = GENRE_NAME_TO_ID[genre_str.lower()]
 
     # 4. Language & Industry / Region Filter
     lang_str = str(language or "all").strip().lower()
@@ -1109,3 +1122,451 @@ def get_analytics_movie_data():
 
     _ANALYTICS_CACHE["full_analytics"] = (now, analytics_package)
     return analytics_package
+
+
+# ============================================================
+# FEATURE 4: CONSUMER-FACING MOVIE INSIGHTS
+# ============================================================
+
+_INSIGHTS_CACHE = {}
+_INSIGHTS_CACHE_TTL = 900  # 15 minutes
+
+
+def get_movie_collection(movie_id):
+    """
+    Check whether a movie belongs to a TMDB collection.
+    Returns basic collection info dict if member, else None.
+    """
+    if not movie_id:
+        return None
+    try:
+        details = _request(f"/movie/{int(movie_id)}", params={"language": "en-US"}, timeout=10)
+        col = details.get("belongs_to_collection")
+        if isinstance(col, dict) and col.get("id"):
+            return {
+                "id": col.get("id"),
+                "name": str(col.get("name") or ""),
+                "poster_path": col.get("poster_path"),
+                "backdrop_path": col.get("backdrop_path"),
+                "poster": get_poster_url(col.get("poster_path")),
+                "backdrop": get_poster_url(col.get("backdrop_path")),
+            }
+        return None
+    except Exception as exc:
+        print("get_movie_collection error:", exc)
+        return None
+
+
+def get_collection_details(collection_id):
+    """
+    Fetch and format real TMDB movie collection data.
+    Returns franchise name, overview, poster, backdrop, parts list, and year range.
+    """
+    collection_id = str(collection_id).strip()
+    if not collection_id or not collection_id.isdigit():
+        return None
+
+    cache_key = f"col_{collection_id}"
+    now = time.time()
+    if cache_key in _INSIGHTS_CACHE:
+        c_time, c_data = _INSIGHTS_CACHE[cache_key]
+        if now - c_time < _INSIGHTS_CACHE_TTL:
+            return c_data
+
+    try:
+        data = _request(f"/collection/{collection_id}", timeout=10)
+    except Exception as exc:
+        print(f"Collection fetch error ({collection_id}):", exc)
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    raw_parts = data.get("parts", []) or []
+    # Sort parts chronologically by release_date
+    sorted_parts = sorted(
+        [p for p in raw_parts if isinstance(p, dict)],
+        key=lambda x: str(x.get("release_date") or "9999"),
+    )
+
+    formatted_parts = [format_tmdb_movie(p) for p in sorted_parts]
+    consumer_parts = [
+        {
+            "id": p.get("id"),
+            "tmdb_id": p.get("tmdb_id"),
+            "title": p.get("title"),
+            "year": p.get("year"),
+            "release_date": p.get("release_date"),
+            "poster": p.get("poster"),
+            "rating": p.get("rating"),
+            "votes": p.get("vote_count"),
+            "language": p.get("language"),
+            "genres": p.get("genres"),
+        }
+        for p in formatted_parts
+    ]
+
+    # Calculate year range
+    years = [
+        p.get("year")
+        for p in consumer_parts
+        if p.get("year") and str(p.get("year")).isdigit()
+    ]
+    year_range = ""
+    if years:
+        if len(years) == 1:
+            year_range = str(years[0])
+        else:
+            year_range = f"{years[0]}–{years[-1]}"
+
+    col_info = {
+        "id": data.get("id"),
+        "name": data.get("name", "Collection"),
+        "overview": str(data.get("overview") or "").strip(),
+        "poster": get_poster_url(data.get("poster_path")),
+        "backdrop": get_poster_url(data.get("backdrop_path"), size="w1280"),
+        "count": len(consumer_parts),
+        "year_range": year_range,
+        "parts": consumer_parts,
+    }
+
+    _INSIGHTS_CACHE[cache_key] = (now, col_info)
+    return col_info
+
+
+def get_movie_insights_data():
+    """
+    Fetch comprehensive, consumer-facing TMDB movie discovery & insights data:
+    1. Movie of the Month (Deterministic winner with consumer-friendly presentation)
+    2. 2026 Movie Trends (Trending Now, Highest Rated, Most Voted, Most Popular)
+    3. Coming Soon (Next 7 Days, Next 30 Days, Next 3 Months, Most Anticipated)
+    4. Recently Released (2026 releases sorted newest first)
+    5. Movie Collections (Real TMDB franchises: Spider-Man, Harry Potter, John Wick, Fast & Furious, Jurassic Park, Avengers)
+    6. Genre Insights ('What's Popular?' with 8 genres, verified counts, and representative movies)
+    7. Cinema Around the World (Hollywood, Bollywood, South Indian, Korean, Japanese, International + Language discovery)
+    """
+    now = time.time()
+    if "full_movie_insights" in _INSIGHTS_CACHE:
+        c_time, c_data = _INSIGHTS_CACHE["full_movie_insights"]
+        if now - c_time < _INSIGHTS_CACHE_TTL:
+            return c_data
+
+    today = datetime.now().date()
+    today_str = today.isoformat()
+    d7_str = (today + timedelta(days=7)).isoformat()
+    d30_str = (today + timedelta(days=30)).isoformat()
+    d90_str = (today + timedelta(days=90)).isoformat()
+
+    def fetch_endpoint(params, limit=10):
+        try:
+            res = _request("/discover/movie", params=params, timeout=10)
+            return [format_tmdb_movie(m) for m in (res.get("results", []) or [])[:limit] if isinstance(m, dict)]
+        except Exception as exc:
+            print("Insights section fetch error:", exc)
+            return []
+
+    # Parallel jobs for trends, releases, and upcoming
+    jobs = {
+        "trending_now": {
+            "language": "en-US",
+            "primary_release_date.gte": "2026-01-01",
+            "primary_release_date.lte": today_str,
+            "sort_by": "popularity.desc",
+            "vote_count.gte": 15,
+        },
+        "highest_rated": {
+            "language": "en-US",
+            "primary_release_date.gte": "2026-01-01",
+            "primary_release_date.lte": today_str,
+            "sort_by": "vote_average.desc",
+            "vote_count.gte": 40,
+        },
+        "most_voted": {
+            "language": "en-US",
+            "primary_release_date.gte": "2026-01-01",
+            "primary_release_date.lte": today_str,
+            "sort_by": "vote_count.desc",
+            "vote_count.gte": 30,
+        },
+        "most_popular": {
+            "language": "en-US",
+            "primary_release_date.gte": "2026-01-01",
+            "primary_release_date.lte": today_str,
+            "sort_by": "popularity.desc",
+            "vote_count.gte": 20,
+        },
+        "recently_released": {
+            "language": "en-US",
+            "primary_release_date.gte": "2026-01-01",
+            "primary_release_date.lte": today_str,
+            "sort_by": "primary_release_date.desc",
+            "vote_count.gte": 5,
+        },
+        "coming_soon_7": {
+            "language": "en-US",
+            "primary_release_date.gte": today_str,
+            "primary_release_date.lte": d7_str,
+            "sort_by": "primary_release_date.asc",
+        },
+        "coming_soon_30": {
+            "language": "en-US",
+            "primary_release_date.gte": today_str,
+            "primary_release_date.lte": d30_str,
+            "sort_by": "primary_release_date.asc",
+        },
+        "coming_soon_90": {
+            "language": "en-US",
+            "primary_release_date.gte": today_str,
+            "primary_release_date.lte": d90_str,
+            "sort_by": "primary_release_date.asc",
+        },
+        "coming_soon_anticipated": {
+            "language": "en-US",
+            "primary_release_date.gte": today_str,
+            "sort_by": "popularity.desc",
+        },
+    }
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        future_map = {executor.submit(fetch_endpoint, p, 10): k for k, p in jobs.items()}
+        for f in as_completed(future_map):
+            key = future_map[f]
+            try:
+                results[key] = f.result()
+            except Exception:
+                results[key] = []
+
+    # Movie of the Month (Deterministic)
+    motm = get_movie_of_the_month()
+    if motm:
+        motm["selection_note"] = "Selected using release, rating, voting activity and popularity signals."
+
+    # Curated Real TMDB Collections
+    curated_col_ids = [556, 1241, 404609, 9485, 328, 86311]
+    collections_list = []
+    with ThreadPoolExecutor(max_workers=6) as col_executor:
+        col_futures = [col_executor.submit(get_collection_details, cid) for cid in curated_col_ids]
+        for cf in col_futures:
+            try:
+                c_data = cf.result()
+                if c_data:
+                    collections_list.append(c_data)
+            except Exception as exc:
+                print("Error loading collection:", exc)
+
+    # 8 Major Genres for 'What's Popular?' with reliable TMDB counts and representative movies
+    genre_specs = [
+        {"name": "Action", "id": "28", "icon": "⚡", "desc": "High-octane blockbusters & adrenaline"},
+        {"name": "Drama", "id": "18", "icon": "🎭", "desc": "Compelling human stories & character depth"},
+        {"name": "Horror", "id": "27", "icon": "👻", "desc": "Dark thrillers, supernatural & psychological fear"},
+        {"name": "Comedy", "id": "35", "icon": "😂", "desc": "Feel-good humor, witty satire & entertainment"},
+        {"name": "Thriller", "id": "53", "icon": "🔍", "desc": "High suspense, mystery & plot twists"},
+        {"name": "Sci-Fi", "id": "878", "icon": "🚀", "desc": "Futuristic concepts, multiverse & cosmic wonder"},
+        {"name": "Romance", "id": "10749", "icon": "❤️", "desc": "Passionate romances & heartfelt journeys"},
+        {"name": "Animation", "id": "16", "icon": "🎨", "desc": "Artistic animated features & visual masterpieces"},
+    ]
+
+    genre_insights = []
+    def fetch_genre_data(spec):
+        try:
+            res = _request(
+                "/discover/movie",
+                params={"with_genres": spec["id"], "sort_by": "popularity.desc", "page": 1},
+                timeout=8,
+            )
+            total = res.get("total_results", 0)
+            raw_top = res.get("results", []) or []
+            top_movies = [format_tmdb_movie(m) for m in raw_top[:3] if isinstance(m, dict)]
+
+            if total >= 10000:
+                count_str = f"{total // 1000 * 1000:,}+ movies"
+            elif total > 0:
+                count_str = f"{total:,} movies"
+            else:
+                count_str = "Available on TMDB"
+
+            return {
+                "name": spec["name"],
+                "id": spec["id"],
+                "icon": spec["icon"],
+                "desc": spec["desc"],
+                "total_count": count_str,
+                "top_movies": top_movies,
+                "explore_url": f"/explore?genre={spec['id']}",
+            }
+        except Exception:
+            return {
+                "name": spec["name"],
+                "id": spec["id"],
+                "icon": spec["icon"],
+                "desc": spec["desc"],
+                "total_count": "Available on TMDB",
+                "top_movies": [],
+                "explore_url": f"/explore?genre={spec['id']}",
+            }
+
+    with ThreadPoolExecutor(max_workers=8) as genre_executor:
+        genre_futures = [genre_executor.submit(fetch_genre_data, gs) for gs in genre_specs]
+        for gf in genre_futures:
+            try:
+                g_res = gf.result()
+                if g_res:
+                    genre_insights.append(g_res)
+            except Exception:
+                pass
+
+    # Sort genre_insights to match the original order
+    order_map = {gs["id"]: i for i, gs in enumerate(genre_specs)}
+    genre_insights.sort(key=lambda g: order_map.get(str(g.get("id")), 99))
+
+    # Cinema Around the World
+    world_specs = [
+        {
+            "id": "hollywood",
+            "name": "Hollywood",
+            "tagline": "Global Blockbusters & Major Studios",
+            "flag": "🇺🇸",
+            "explore_url": "/explore?industry=hollywood",
+            "query": {"with_original_language": "en", "sort_by": "popularity.desc"},
+            "languages": [{"name": "English", "code": "en"}],
+        },
+        {
+            "id": "bollywood",
+            "name": "Bollywood",
+            "tagline": "Hindi Cinema, Epics & Musicals",
+            "flag": "🇮🇳",
+            "explore_url": "/explore?industry=bollywood",
+            "query": {"with_original_language": "hi", "sort_by": "popularity.desc"},
+            "languages": [{"name": "Hindi", "code": "hi"}],
+        },
+        {
+            "id": "south_indian",
+            "name": "South Indian Cinema",
+            "tagline": "Tamil, Telugu, Malayalam & Kannada Industries",
+            "flag": "🇮🇳",
+            "explore_url": "/explore?industry=south_indian",
+            "query": {"with_original_language": "te", "sort_by": "popularity.desc"},
+            "languages": [
+                {"name": "Tamil", "code": "ta"},
+                {"name": "Telugu", "code": "te"},
+                {"name": "Malayalam", "code": "ml"},
+                {"name": "Kannada", "code": "kn"},
+            ],
+        },
+        {
+            "id": "korean",
+            "name": "Korean Cinema",
+            "tagline": "K-Thrillers, Auteur Drama & Global Phenomenons",
+            "flag": "🇰🇷",
+            "explore_url": "/explore?language=ko",
+            "query": {"with_original_language": "ko", "sort_by": "popularity.desc"},
+            "languages": [{"name": "Korean", "code": "ko"}],
+        },
+        {
+            "id": "japanese",
+            "name": "Japanese Cinema",
+            "tagline": "Masterpiece Anime, Kaiju & Modern Cinema",
+            "flag": "🇯🇵",
+            "explore_url": "/explore?language=ja",
+            "query": {"with_original_language": "ja", "sort_by": "popularity.desc"},
+            "languages": [{"name": "Japanese", "code": "ja"}],
+        },
+        {
+            "id": "international",
+            "name": "International Cinema",
+            "tagline": "European, Latin American & Global Auteur Cinema",
+            "flag": "🌍",
+            "explore_url": "/explore?industry=european",
+            "query": {"with_original_language": "fr", "sort_by": "popularity.desc"},
+            "languages": [
+                {"name": "Spanish", "code": "es"},
+                {"name": "French", "code": "fr"},
+                {"name": "German", "code": "de"},
+                {"name": "Italian", "code": "it"},
+            ],
+        },
+    ]
+
+    cinema_world = []
+    def fetch_world_region(ws):
+        try:
+            p = dict(ws["query"])
+            p["vote_count.gte"] = 10
+            res = _request("/discover/movie", params=p, timeout=8)
+            movies = [format_tmdb_movie(m) for m in (res.get("results", []) or [])[:4] if isinstance(m, dict)]
+            top_m = movies[0] if movies else None
+            return {
+                "id": ws["id"],
+                "name": ws["name"],
+                "tagline": ws["tagline"],
+                "flag": ws["flag"],
+                "explore_url": ws["explore_url"],
+                "languages": ws["languages"],
+                "top_movie": top_m,
+                "movies": movies,
+            }
+        except Exception:
+            return {
+                "id": ws["id"],
+                "name": ws["name"],
+                "tagline": ws["tagline"],
+                "flag": ws["flag"],
+                "explore_url": ws["explore_url"],
+                "languages": ws["languages"],
+                "top_movie": None,
+                "movies": [],
+            }
+
+    with ThreadPoolExecutor(max_workers=6) as world_executor:
+        world_futures = [world_executor.submit(fetch_world_region, ws) for ws in world_specs]
+        for wf in world_futures:
+            try:
+                w_res = wf.result()
+                if w_res:
+                    cinema_world.append(w_res)
+            except Exception:
+                pass
+
+    world_order_map = {ws["id"]: i for i, ws in enumerate(world_specs)}
+    cinema_world.sort(key=lambda w: world_order_map.get(str(w.get("id")), 99))
+
+    # Language discovery quick shortcuts
+    language_shortcuts = [
+        {"name": "English", "code": "en", "flag": "🇺🇸"},
+        {"name": "Hindi", "code": "hi", "flag": "🇮🇳"},
+        {"name": "Tamil", "code": "ta", "flag": "🇮🇳"},
+        {"name": "Telugu", "code": "te", "flag": "🇮🇳"},
+        {"name": "Malayalam", "code": "ml", "flag": "🇮🇳"},
+        {"name": "Kannada", "code": "kn", "flag": "🇮🇳"},
+        {"name": "Korean", "code": "ko", "flag": "🇰🇷"},
+        {"name": "Japanese", "code": "ja", "flag": "🇯🇵"},
+        {"name": "Spanish", "code": "es", "flag": "🇪🇸"},
+        {"name": "French", "code": "fr", "flag": "🇫🇷"},
+        {"name": "German", "code": "de", "flag": "🇩🇪"},
+    ]
+
+    insights_package = {
+        "movie_of_the_month": motm,
+        "trends_2026": {
+            "trending_now": results.get("trending_now", []),
+            "highest_rated": results.get("highest_rated", []),
+            "most_voted": results.get("most_voted", []),
+            "most_popular": results.get("most_popular", []),
+        },
+        "coming_soon": {
+            "next_7_days": results.get("coming_soon_7", []),
+            "next_30_days": results.get("coming_soon_30", []),
+            "next_90_days": results.get("coming_soon_90", []),
+            "most_anticipated": results.get("coming_soon_anticipated", []),
+        },
+        "recently_released": results.get("recently_released", []),
+        "collections": collections_list,
+        "genre_insights": genre_insights,
+        "cinema_world": cinema_world,
+        "language_shortcuts": language_shortcuts,
+    }
+
+    _INSIGHTS_CACHE["full_movie_insights"] = (now, insights_package)
+    return insights_package
+
